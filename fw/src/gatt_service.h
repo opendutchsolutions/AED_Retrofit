@@ -4,14 +4,27 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Call once from bt_begin(), before bt_run()
+/**
+ * @brief Initialize the BLE GATT protocol layer
+ */
 void gatt_service_init(void);
 
-// Call from bt.c packet_handler once BTSTACK_EVENT_STATE → HCI_STATE_WORKING
+/**
+ * @brief Initialize the BLE background timer for polling the buttons
+ */
 void gatt_service_start_timer(void);
 
-// Returns last LED bitmask written by BLE central
-// bit0=SHOCK, bit1=ON_OFF, bit2=INFO, bit3=HANDS_OFF, bit4=LOW_BELLY, bit5=BREAST
+/**
+ * @brief Helper to get the current Led + buzzer bitmask written by BLE GATT
+ * @return Led mask byte with:
+ *         Bit0=SHOCK
+ *         Bit1=ON_OFF
+ *         Bit2=INFO
+ *         Bit3=HANDS_OFF
+ *         Bit4=LOW_BELLY
+ *         Bit5=Breast
+ *         Bit6=Buzzer
+ */
 uint8_t gatt_service_get_leds(void);
 
 #endif /* GATT_SERVICE_H */

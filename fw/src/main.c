@@ -59,7 +59,6 @@ int main(void) {
     stdio_init_all();
 
     // Initialize CYW43 driver architecture
-    // (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
     if (cyw43_arch_init()) {
         printf("Failed to init cyw43_arch\n");
         fatal();
