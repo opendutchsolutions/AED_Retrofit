@@ -53,6 +53,7 @@
 #include <hardware/dma.h>
 
 #include "pico/audio_i2s.h"
+#include "hardware/gpio.h"
 
 #define DRIVER_POLL_INTERVAL_MS 5
 #define SAMPLES_PER_BUFFER      512
@@ -98,6 +99,10 @@ static audio_buffer_pool_t *init_audio(uint32_t sample_frequency, uint8_t channe
     bool ok = audio_i2s_connect(producer_pool);
     assert(ok);
     (void)ok;
+    
+    gpio_set_drive_strength(PICO_AUDIO_I2S_DATA_PIN,           GPIO_DRIVE_STRENGTH_2MA);
+    gpio_set_drive_strength(PICO_AUDIO_I2S_CLOCK_PIN_BASE,     GPIO_DRIVE_STRENGTH_2MA);
+    gpio_set_drive_strength(PICO_AUDIO_I2S_CLOCK_PIN_BASE + 1, GPIO_DRIVE_STRENGTH_2MA);
 
     return producer_pool;
 }

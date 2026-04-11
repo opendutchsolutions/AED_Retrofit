@@ -14,6 +14,7 @@ static const uint8_t LED_PINS[] = {
     HANDS_OFF_LED_PIN,
     LOW_BELLY_INDICATOR_PIN,
     BREAST_INDICATOR_PIN,
+    BUZZER_PIN
 };
 #define NUM_LEDS ((uint8_t)(sizeof(LED_PINS) / sizeof(LED_PINS[0])))
 
@@ -187,7 +188,14 @@ void gatt_service_init(void) {
         gpio_init(LED_PINS[i]);
         gpio_set_dir(LED_PINS[i], GPIO_OUT);
         gpio_put(LED_PINS[i], 0);
+        gpio_set_drive_strength(LED_PINS[i], GPIO_DRIVE_STRENGTH_2MA);
+        gpio_set_slew_rate(LED_PINS[i], GPIO_SLEW_RATE_SLOW);
     }
+    gpio_init(BUZZER_PIN);
+    gpio_set_dir(BUZZER_PIN, GPIO_OUT);
+    gpio_put(BUZZER_PIN, 0);
+    gpio_set_drive_strength(BUZZER_PIN, GPIO_DRIVE_STRENGTH_8MA);
+    gpio_set_slew_rate(BUZZER_PIN, GPIO_SLEW_RATE_SLOW);
 
     // Initialize buttons as inputs with pull-up
     for (uint8_t i = 0; i < NUM_BUTTONS; i++) {

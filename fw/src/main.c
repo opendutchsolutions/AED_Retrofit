@@ -1,6 +1,7 @@
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "hardware/watchdog.h"
+#include "hardware/clocks.h"
 #include "board_config.h"
 #include "bt.h"
 #include "gatt_service.h"
@@ -43,6 +44,12 @@ static void led_pins_init(void) {
     gpio_set_dir(STATUS_LED_B_PIN, GPIO_OUT);
     gpio_set_dir(STATUS_LED_G_PIN, GPIO_OUT);
     gpio_set_dir(STATUS_LED_R_PIN, GPIO_OUT);
+    gpio_set_drive_strength(STATUS_LED_B_PIN, GPIO_DRIVE_STRENGTH_2MA);
+    gpio_set_drive_strength(STATUS_LED_G_PIN, GPIO_DRIVE_STRENGTH_2MA);
+    gpio_set_drive_strength(STATUS_LED_R_PIN, GPIO_DRIVE_STRENGTH_2MA);
+    gpio_set_slew_rate(STATUS_LED_B_PIN, GPIO_SLEW_RATE_SLOW);
+    gpio_set_slew_rate(STATUS_LED_G_PIN, GPIO_SLEW_RATE_SLOW);
+    gpio_set_slew_rate(STATUS_LED_R_PIN, GPIO_SLEW_RATE_SLOW);
     gpio_put(STATUS_LED_R_PIN, 1);
     gpio_put(STATUS_LED_G_PIN, 1);
     gpio_put(STATUS_LED_B_PIN, 1);
@@ -51,14 +58,6 @@ static void led_pins_init(void) {
 int main(void) {
     stdio_init_all();
 
-    // Wait for USB CDC to connect (up to 5s)
-    for (int i = 0; i < 50 && !stdio_usb_connected(); i++) {
-        sleep_ms(100);
-    }
-    sleep_ms(200);  // Extra settle time
-
-    printf("USB connected\n");
-
     // Initialize CYW43 driver architecture
     // (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
     if (cyw43_arch_init()) {
@@ -66,10 +65,7 @@ int main(void) {
         fatal();
         return -1;
     }
-
-    // LED on during setup until BT is up
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, true);
-
+    cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, false, CYW43_COUNTRY_WORLDWIDE);
     bt_begin(BT_NAME, BT_PIN, on_bt_up, NULL);
     led_pins_init();
 
