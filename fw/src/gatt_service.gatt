@@ -1,11 +1,15 @@
 // gatt_service.gatt
-PRIMARY_SERVICE, 0xFF10
+PRIMARY_SERVICE,
+    0xFF10
 
-// --- Buttons (read + notify) ---
-// Button bitmask: bit0=SHOCK, bit1=ON_OFF, bit2=INFO
-CHARACTERISTIC, 0xFF11, READ | NOTIFY, 0
+    // --- Buttons (read + notify) ---
+    // Button bitmask: bit0=SHOCK, bit1=ON_OFF, bit2=INFO
+    CHARACTERISTIC,
+    0xFF11, READ | NOTIFY,
+    0
 
-// --- LEDs (read + write) ---
-// LED bitmask: bit0=SHOCK, bit1=ON_OFF, bit2=INFO, bit3=HANDS_OFF,
-//              bit4=LOW_BELLY, bit5=BREAST
-CHARACTERISTIC, 0xFF12, READ | WRITE, 0
+    // --- LEDs (read + write) ---
+    // LED bitmask: bit0=SHOCK, bit1=ON_OFF, bit2=INFO, bit3=HANDS_OFF,
+    //              bit4=LOW_BELLY, bit5=BREAST
+    CHARACTERISTIC,
+    0xFF12, READ | WRITE, 0
