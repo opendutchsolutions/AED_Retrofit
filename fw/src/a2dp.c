@@ -281,7 +281,7 @@ static void event_handler(uint8_t event, uint8_t *packet) {
             _seid = a2dp_subevent_stream_established_get_local_seid(packet);
             _stream_state = STREAM_STATE_OPEN;
             printf("[a2dp] seid=%d, setting LEDs\n", _seid);
-            printf("[a2dp] cyw43 led done\n");
+            gpio_put(STATUS_LED_R_PIN, 0);
             printf("[a2dp] stream open\n");
             break;
 
