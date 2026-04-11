@@ -4,82 +4,77 @@
 #include "board_config.h"
 #include "bt.h"
 #include "gatt_service.h"
-// Call this periodically, e.g. every 20 ms from a repeating timer
-// void poll_buttons(void) {
-//     static uint8_t last = 0xFF;
-//     uint8_t current = sample_buttons(); // or replicate the logic inline
-//     if (current != last) {
-//         gatt_service_update_buttons(current);
-//         last = current;
-//     }
-// }
 
-// Unrecoverable error happened. Reboot by setting watchdog.
-// Blink led until watchdog fires
-// If RUN_PIN is defined then try reset via run pin after 5 blinks
-void fatal() {
-    watchdog_enable(1000, true);  // reboot in 1s
-    #ifdef RUN_PIN
-        unsigned count = 0;
-    #endif
-    while(true) {  // blink until reboot
+void fatal(void) {
+    watchdog_enable(1000, true);  // Reboot in 1s
+
+#ifdef RUN_PIN
+    unsigned count = 0;
+#endif
+
+    // Blink until reboot
+    while (true) {
         gpio_put(STATUS_LED_R_PIN, 0);
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, true);
         sleep_ms(20);
         gpio_put(STATUS_LED_R_PIN, 1);
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
         sleep_ms(80);
-        #ifdef RUN_PIN
-            if (++count >= 5) {
-                // Pull run pin low, to reset the pico
-                gpio_init(RUN_PIN);
-                gpio_set_dir(RUN_PIN, GPIO_OUT);
-                gpio_put(RUN_PIN, (count & 1) ? false : true);
-            }
-        #endif
+
+#ifdef RUN_PIN
+        if (++count >= 5) {
+            // Pull run pin low to reset the pico
+            gpio_init(RUN_PIN);
+            gpio_set_dir(RUN_PIN, GPIO_OUT);
+            gpio_put(RUN_PIN, (count & 1) ? false : true);
+        }
+#endif
     }
 }
 
-
-void on_bt_up( void * ) {
+static void on_bt_up(void *context) {
     printf("Bluetooth stack is up\n");
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
 }
 
-void led_pins_init() {
+static void led_pins_init(void) {
     gpio_init(STATUS_LED_B_PIN);
     gpio_init(STATUS_LED_G_PIN);
     gpio_init(STATUS_LED_R_PIN);
-
     gpio_set_dir(STATUS_LED_B_PIN, GPIO_OUT);
-    gpio_set_dir(STATUS_LED_G_PIN, GPIO_OUT);   
-    gpio_set_dir(STATUS_LED_R_PIN, GPIO_OUT);   
+    gpio_set_dir(STATUS_LED_G_PIN, GPIO_OUT);
+    gpio_set_dir(STATUS_LED_R_PIN, GPIO_OUT);
     gpio_put(STATUS_LED_R_PIN, 1);
     gpio_put(STATUS_LED_G_PIN, 1);
     gpio_put(STATUS_LED_B_PIN, 1);
-    
-    
 }
 
-
-int main() {
+int main(void) {
     stdio_init_all();
 
+    // Wait for USB CDC to connect (up to 5s)
+    for (int i = 0; i < 50 && !stdio_usb_connected(); i++) {
+        sleep_ms(100);
+    }
+    sleep_ms(200);  // Extra settle time
 
+    printf("USB connected\n");
 
-    // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
+    // Initialize CYW43 driver architecture
+    // (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
     if (cyw43_arch_init()) {
         printf("Failed to init cyw43_arch\n");
         fatal();
         return -1;
     }
 
-    // led on during setup until bt is up
+    // LED on during setup until BT is up
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, true);
 
     bt_begin(BT_NAME, BT_PIN, on_bt_up, NULL);
     led_pins_init();
+
     printf("Setup done\n");
+
     bt_run();
 
     fatal();
