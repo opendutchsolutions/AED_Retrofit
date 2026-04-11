@@ -2,6 +2,8 @@
 AED retrofit fw (Heartstart)
 
 
+## Hardware
+![Schematic of the hardware](docs/assets/schematic_hw.png)
 
 ## License and Credits
 
