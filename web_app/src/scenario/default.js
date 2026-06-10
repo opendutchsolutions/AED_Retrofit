@@ -9,11 +9,13 @@ export const LANGUAGES = ['Nederlands', 'Duits'];
 
 export const AUDIO_FILES = {
   Nederlands: {
-    warning:       'audio/Nederlands/1_Warning.wav',
+    warning:       'audio/Nederlands/1_Warning.mp3',
     place_pads:    'audio/Nederlands/2_PlacePads.wav',
     analyse:       'audio/Nederlands/3_AnalyseRitme.wav',
     shock_advised: 'audio/Nederlands/4_ShockAdvised.wav',
     shock:         'audio/Nederlands/5_Shock.wav',
+    dont_touch_patient: 'audio/Nederlands/5_5_dont_touch_patient.wav',
+    shock_delivered: 'audio/Nederlands/5_6_shock_delivered.wav',
     no_shock:      'audio/Nederlands/6_NoShock.wav',
     cpr:           'audio/Nederlands/7_CPR.wav',
   },
@@ -63,8 +65,8 @@ export const DEFAULT_STEPS = [
     audioKey: 'place_pads',
     timeout_seconds: 60,
     choices: [
-      { label: 'Pads correctly placed', next: 'analyse' },
       { label: 'Pads incorrectly placed', next: 'place-pads' },
+      { label: 'Pads correctly placed', next: 'analyse' },
     ],
   },
   {
@@ -93,12 +95,33 @@ export const DEFAULT_STEPS = [
   },
   {
     id: 'post-shock-cpr',
-    label: 'Shock delivered — CPR',
+    label: 'Delivering shock',
     instruction: 'Shock delivered. Start CPR immediately: 30 compressions, 2 breaths. 2 minutes.',
     type: 'timed',
     leds: { on_off: true },
     audioKey: 'shock',
-    duration_seconds: 120,
+    duration_seconds: 5,
+    on_complete: 'post-shock-cpr2',
+  },
+  {
+    id: 'post-shock-cpr2',
+    label: 'Dont touch patient',
+    instruction: 'Dont touch patient',
+    type: 'timed',
+    leds: { on_off: true, buzzer: true },
+    buzzer_duration_ms: 5000,
+    audioKey: 'dont_touch_patient',
+    duration_seconds: 5,
+    on_complete: 'post-shock-cpr3',
+  },
+    {
+    id: 'post-shock-cpr3',
+    label: 'Shock delivered',
+    instruction: 'Shock delivered. Start CPR immediately: 30 compressions, 2 breaths. 2 minutes.',
+    type: 'timed',
+    leds: { on_off: true },
+    audioKey: 'shock_delivered',
+    duration_seconds: 5,
     on_complete: 'analyse-2',
   },
   {
@@ -108,8 +131,8 @@ export const DEFAULT_STEPS = [
     type: 'timed',
     leds: { on_off: true },
     audioKey: 'no_shock',
-    duration_seconds: 120,
-    on_complete: 'analyse-2',
+    duration_seconds: 5,
+    on_complete: 'cpr-2',
   },
   {
     id: 'analyse-2',
@@ -143,7 +166,10 @@ export const DEFAULT_STEPS = [
     leds: { on_off: true },
     audioKey: 'cpr',
     duration_seconds: 120,
-    on_complete: 'end-scenario',
+    choices: [
+      { label: 'Heranalyseer hart-ritme', next: 'analyse-2' },
+      { label: 'Beeindig scenario', next: 'end-scenario'},
+    ],
   },
   {
     id: 'rosc-or-continue',
