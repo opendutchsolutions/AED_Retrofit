@@ -103,10 +103,10 @@ export function useBLE({ onButtonChange } = {}) {
   }, []);
 
   const writeLeds = useCallback(async (mask) => {
-    if (!charLeds.current) return;
     const clamped = mask & 0x7f;  // 7 bits: 6 LEDs + buzzer
     ledMaskRef.current = clamped;
-    setLedMaskState(clamped);
+    setLedMaskState(clamped);     // always update UI, even without hardware
+    if (!charLeds.current) return;
     try {
       await charLeds.current.writeValueWithoutResponse(new Uint8Array([clamped]));
     } catch(e) {
