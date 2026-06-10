@@ -76,7 +76,7 @@ function BtnDot({ active, label, type, onClick }) {
 export function HardwarePanel({ ledMask, btnMask, onToggleLed, onPressBtn, readOnly }) {
   return (
     <Card>
-      <SectionLabel>LEDs — 0xFF12</SectionLabel>
+      <SectionLabel>LEDs</SectionLabel>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
         {LED_DEFS.map(({ key, bit, label }) => (
           <LedDot
@@ -89,7 +89,7 @@ export function HardwarePanel({ ledMask, btnMask, onToggleLed, onPressBtn, readO
       </div>
       <Divider />
 
-      <SectionLabel>Buzzer — bit 6</SectionLabel>
+      <SectionLabel>Buzzer</SectionLabel>
       <div
         onClick={readOnly ? undefined : () => onToggleLed(6)}
         title={readOnly ? undefined : 'Toggle buzzer'}
@@ -114,7 +114,7 @@ export function HardwarePanel({ ledMask, btnMask, onToggleLed, onPressBtn, readO
 
       <Divider />
 
-      <SectionLabel>Buttons — 0xFF11</SectionLabel>
+      <SectionLabel>Buttons</SectionLabel>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
         {BTN_DEFS.map(({ key, bit, label, type }) => (
           <BtnDot

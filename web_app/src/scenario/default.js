@@ -58,13 +58,14 @@ export const DEFAULT_STEPS = [
     id: 'place-pads',
     label: 'Place pads on patient',
     instruction: 'Instruct trainee to attach electrode pads per diagram (breast + low belly).',
-    type: 'button',
+    type: 'branch',
     leds: { on_off: true, low_belly: true, breast: true },
     audioKey: 'place_pads',
-    expect_button: 'info',
     timeout_seconds: 60,
-    on_correct: 'analyse',
-    on_timeout: 'place-pads',
+    choices: [
+      { label: 'Pads correctly placed', next: 'analyse' },
+      { label: 'Pads incorrectly placed', next: 'place-pads' },
+    ],
   },
   {
     id: 'analyse',

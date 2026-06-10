@@ -13,17 +13,21 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
 
   const audioBank = useAudioBank();
 
-  const stepMap       = useRef(buildStepMap(DEFAULT_STEPS));
-  const audioBankRef  = useRef(audioBank.bank);
-  const timerRef      = useRef(null);
-  const countRef      = useRef(null);
-  const buzzerTimerRef = useRef(null);
-  const expectBtn     = useRef(null);
-  const onTimeoutRef  = useRef(null);
+  const stepMap          = useRef(buildStepMap(DEFAULT_STEPS));
+  const audioBankRef     = useRef(audioBank.bank);
+  const runningRef       = useRef(false);
+  const currentStepIdRef = useRef(null);
+  const timerRef         = useRef(null);
+  const countRef         = useRef(null);
+  const buzzerTimerRef   = useRef(null);
+  const expectBtn        = useRef(null);
+  const onTimeoutRef     = useRef(null);
 
-  // keep stepMap and audioBankRef in sync
+  // keep refs in sync with state so BLE callbacks never read stale values
   useEffect(() => { stepMap.current = buildStepMap(steps); }, [steps]);
   useEffect(() => { audioBankRef.current = audioBank.bank; }, [audioBank.bank]);
+  runningRef.current       = running;
+  currentStepIdRef.current = currentStepId;
 
   const logSession = useCallback((msg, type='') => {
     const t = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
@@ -139,18 +143,22 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
     gotoStep(nextId);
   }, [gotoStep, logSession]);
 
-  // Called by BLE hook on button notify
+  // Called by BLE hook on button notify.
+  // Reads running/currentStepId from refs so it never has a stale closure —
+  // the previous bug was that if the re-render hadn't committed yet after a
+  // branch selection, currentStepId was still 'analyse' (which has no
+  // on_correct), so the shock press was silently ignored.
   const handleButton = useCallback((mask) => {
-    if (!running || !expectBtn.current) return;
+    if (!runningRef.current || !expectBtn.current) return;
     const BTN_BITS = { shock:0, on_off:1, info:2, card_slot:3, pads_inserted:4 };
     const bit = BTN_BITS[expectBtn.current];
     if (bit === undefined) return;
     if (mask & (1 << bit)) {
-      const step = stepMap.current[currentStepId];
+      const step = stepMap.current[currentStepIdRef.current];
       logSession(`Button "${expectBtn.current}" pressed ✓`, 'ok');
       if (step?.on_correct) gotoStep(step.on_correct);
     }
-  }, [running, currentStepId, gotoStep, logSession]);
+  }, [logSession, gotoStep]);
 
   const clearSessionLog = useCallback(() => setSessionLog([]), []);
 
