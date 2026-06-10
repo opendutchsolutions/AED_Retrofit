@@ -37,14 +37,18 @@ export function ScenarioPanel({
           <option>Duits</option>
         </select>
         {!running
-          ? <Btn variant="success" onClick={onStart} disabled={!connected}>Start session</Btn>
-          : <Btn variant="danger"  onClick={onStop}>Stop</Btn>
+          ? <Btn variant={connected ? 'success' : 'amber'} onClick={onStart}>
+              {connected ? 'Start session' : 'Simulate'}
+            </Btn>
+          : <Btn variant="danger" onClick={onStop}>Stop</Btn>
         }
       </div>
 
       {!running && !currentStep && (
         <div style={{ color: 'var(--text3)', fontSize: 13, padding: '24px 0', textAlign: 'center' }}>
-          Connect device and press Start session to begin.
+          {connected
+            ? 'Press Start session to begin.'
+            : 'Press Simulate to run without hardware, or connect a device first.'}
         </div>
       )}
 

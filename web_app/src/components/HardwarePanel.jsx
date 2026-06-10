@@ -45,16 +45,21 @@ function LedDot({ on, onClick, label }) {
   );
 }
 
-function BtnDot({ active, label, type }) {
+function BtnDot({ active, label, type, onClick }) {
   const isBtn = type === 'btn';
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
-      padding: '9px 6px', borderRadius: 'var(--radius)',
-      border: `1px solid ${active ? (isBtn ? 'var(--red-border)' : 'var(--blue-border)') : 'var(--border)'}`,
-      background: active ? (isBtn ? 'var(--red-bg)' : 'var(--blue-bg)') : 'var(--bg3)',
-      transition: 'all 0.15s',
-    }}>
+    <div
+      onClick={onClick}
+      title={onClick ? `Simulate ${label}` : undefined}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+        padding: '9px 6px', borderRadius: 'var(--radius)',
+        border: `1px solid ${active ? (isBtn ? 'var(--red-border)' : 'var(--blue-border)') : 'var(--border)'}`,
+        background: active ? (isBtn ? 'var(--red-bg)' : 'var(--blue-bg)') : 'var(--bg3)',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'all 0.15s', userSelect: 'none',
+      }}
+    >
       <div style={{
         width: 16, height: 16, borderRadius: '50%',
         background: active ? (isBtn ? 'var(--red)' : 'var(--blue)') : 'var(--bg4)',
@@ -67,10 +72,8 @@ function BtnDot({ active, label, type }) {
   );
 }
 
-function toHex(v) { return '0x' + v.toString(16).padStart(2, '0').toUpperCase(); }
-function toBits(v) { return v.toString(2).padStart(8, '0'); }
 
-export function HardwarePanel({ ledMask, btnMask, onToggleLed, readOnly }) {
+export function HardwarePanel({ ledMask, btnMask, onToggleLed, onPressBtn, readOnly }) {
   return (
     <Card>
       <SectionLabel>LEDs — 0xFF12</SectionLabel>
@@ -84,8 +87,29 @@ export function HardwarePanel({ ledMask, btnMask, onToggleLed, readOnly }) {
           />
         ))}
       </div>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text3)', marginTop: 8 }}>
-        {toHex(ledMask)} &nbsp; {toBits(ledMask)}
+      <Divider />
+
+      <SectionLabel>Buzzer — bit 6</SectionLabel>
+      <div
+        onClick={readOnly ? undefined : () => onToggleLed(6)}
+        title={readOnly ? undefined : 'Toggle buzzer'}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          padding: '7px 12px', borderRadius: 'var(--radius)',
+          border: `1px solid ${(ledMask & (1 << 6)) ? 'var(--amber-border)' : 'var(--border)'}`,
+          background: (ledMask & (1 << 6)) ? 'var(--amber-bg)' : 'var(--bg3)',
+          cursor: readOnly ? 'default' : 'pointer',
+          transition: 'all 0.15s', userSelect: 'none',
+        }}
+      >
+        <div style={{
+          width: 10, height: 10, borderRadius: '50%',
+          background: (ledMask & (1 << 6)) ? 'var(--amber)' : 'var(--bg4)',
+          transition: 'all 0.15s',
+        }} />
+        <span style={{ fontSize: 12, color: (ledMask & (1 << 6)) ? 'var(--amber)' : 'var(--text3)' }}>
+          {(ledMask & (1 << 6)) ? 'Active' : 'Off'}
+        </span>
       </div>
 
       <Divider />
@@ -93,11 +117,14 @@ export function HardwarePanel({ ledMask, btnMask, onToggleLed, readOnly }) {
       <SectionLabel>Buttons — 0xFF11</SectionLabel>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
         {BTN_DEFS.map(({ key, bit, label, type }) => (
-          <BtnDot key={key} active={!!(btnMask & (1 << bit))} label={label} type={type} />
+          <BtnDot
+            key={key}
+            active={!!(btnMask & (1 << bit))}
+            label={label}
+            type={type}
+            onClick={() => onPressBtn(bit)}
+          />
         ))}
-      </div>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text3)', marginTop: 8 }}>
-        {toHex(btnMask)} &nbsp; {toBits(btnMask)}
       </div>
     </Card>
   );

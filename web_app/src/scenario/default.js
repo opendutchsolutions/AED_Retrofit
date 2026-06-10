@@ -171,7 +171,7 @@ export function buildStepMap(steps) {
 }
 
 export function ledMaskFromObj(obj = {}) {
-  const BITS = { shock:0, on_off:1, info:2, hands_off:3, low_belly:4, breast:5 };
+  const BITS = { shock:0, on_off:1, info:2, hands_off:3, low_belly:4, breast:5, buzzer:6 };
   let mask = 0;
   for (const [k, v] of Object.entries(obj)) {
     if (v && BITS[k] !== undefined) mask |= (1 << BITS[k]);

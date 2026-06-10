@@ -99,6 +99,12 @@ export default function App() {
             steps={sim.steps}
             onStepsChange={sim.setSteps}
             disabled={sim.running}
+            language={sim.language}
+            audioBank={sim.audioBank}
+            onAddAudio={sim.addAudioFile}
+            onRemoveAudio={sim.removeAudioFile}
+            getExportEntries={sim.getAudioExportEntries}
+            onImportAudio={sim.importAudioEntries}
           />
 
           <SessionLog
@@ -113,6 +119,7 @@ export default function App() {
             ledMask={ble.ledMask}
             btnMask={ble.btnMask}
             onToggleLed={onToggleLed}
+            onPressBtn={ble.simulateButton}
             readOnly={sim.running}
           />
 

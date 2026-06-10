@@ -4,7 +4,7 @@ const SVC   = '0000ff10-0000-1000-8000-00805f9b34fb';
 const CBTNS = '0000ff11-0000-1000-8000-00805f9b34fb';
 const CLEDS = '0000ff12-0000-1000-8000-00805f9b34fb';
 
-export const LED_BITS = { shock:0, on_off:1, info:2, hands_off:3, low_belly:4, breast:5 };
+export const LED_BITS = { shock:0, on_off:1, info:2, hands_off:3, low_belly:4, breast:5, buzzer:6 };
 export const BTN_BITS = { shock:0, on_off:1, info:2, card_slot:3, pads_inserted:4 };
 
 export function useBLE({ onButtonChange } = {}) {
@@ -104,7 +104,7 @@ export function useBLE({ onButtonChange } = {}) {
 
   const writeLeds = useCallback(async (mask) => {
     if (!charLeds.current) return;
-    const clamped = mask & 0x3f;
+    const clamped = mask & 0x7f;  // 7 bits: 6 LEDs + buzzer
     ledMaskRef.current = clamped;
     setLedMaskState(clamped);
     try {
@@ -129,10 +129,18 @@ export function useBLE({ onButtonChange } = {}) {
 
   const allLedsOff = useCallback(() => writeLeds(0), [writeLeds]);
 
+  // Simulate a momentary button press — fires the same handler as real hardware
+  const simulateButton = useCallback((bit) => {
+    const mask = 1 << bit;
+    setBtnMask(mask);
+    onBtnRef.current?.(mask);
+    setTimeout(() => setBtnMask(0), 200);
+  }, []);
+
   return {
     status, deviceName, ledMask, btnMask, log,
     connect, disconnect,
     setLed, setLedMask, allLedsOff, writeLeds,
-    addLog,
+    simulateButton, addLog,
   };
 }

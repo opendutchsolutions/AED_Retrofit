@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { DEFAULT_STEPS, AUDIO_FILES, buildStepMap, ledMaskFromObj } from '../scenario/default';
+import { useAudioBank } from './useAudioBank';
 
 export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
   const [running, setRunning]       = useState(false);
@@ -10,16 +11,19 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
   const [language, setLanguage]     = useState('Nederlands');
   const [steps, setSteps]           = useState(DEFAULT_STEPS);
 
-  const stepMap      = useRef(buildStepMap(DEFAULT_STEPS));
-  const timerRef     = useRef(null);
-  const countRef     = useRef(null);
-  const expectBtn    = useRef(null);
-  const onTimeoutRef = useRef(null);
+  const audioBank = useAudioBank();
 
-  // keep stepMap in sync
-  useEffect(() => {
-    stepMap.current = buildStepMap(steps);
-  }, [steps]);
+  const stepMap       = useRef(buildStepMap(DEFAULT_STEPS));
+  const audioBankRef  = useRef(audioBank.bank);
+  const timerRef      = useRef(null);
+  const countRef      = useRef(null);
+  const buzzerTimerRef = useRef(null);
+  const expectBtn     = useRef(null);
+  const onTimeoutRef  = useRef(null);
+
+  // keep stepMap and audioBankRef in sync
+  useEffect(() => { stepMap.current = buildStepMap(steps); }, [steps]);
+  useEffect(() => { audioBankRef.current = audioBank.bank; }, [audioBank.bank]);
 
   const logSession = useCallback((msg, type='') => {
     const t = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
@@ -28,8 +32,9 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
   }, [addLog]);
 
   const clearTimers = useCallback(() => {
-    if (timerRef.current)  { clearTimeout(timerRef.current);  timerRef.current = null; }
-    if (countRef.current)  { clearInterval(countRef.current); countRef.current = null; }
+    if (timerRef.current)     { clearTimeout(timerRef.current);   timerRef.current = null; }
+    if (countRef.current)     { clearInterval(countRef.current);  countRef.current = null; }
+    if (buzzerTimerRef.current) { clearTimeout(buzzerTimerRef.current); buzzerTimerRef.current = null; }
     setTimeLeft(null);
     expectBtn.current    = null;
     onTimeoutRef.current = null;
@@ -45,14 +50,23 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
     setCurrentStepId(id);
     logSession(`→ ${step.label}`, 'step');
 
-    // Apply LEDs
+    // Apply LEDs + buzzer
     const mask = ledMaskFromObj(step.leds);
     setLedMask(mask);
 
-    // Play audio
+    // Auto-clear buzzer after duration if set
+    if ((mask & (1 << 6)) && step.buzzer_duration_ms > 0) {
+      buzzerTimerRef.current = setTimeout(() => {
+        buzzerTimerRef.current = null;
+        setLedMask(mask & ~(1 << 6));
+      }, step.buzzer_duration_ms);
+    }
+
+    // Play audio — custom bank takes priority over built-in files
     const audioMap = AUDIO_FILES[language] || AUDIO_FILES['Nederlands'];
-    if (step.audioKey && audioMap[step.audioKey]) {
-      playAudio(audioMap[step.audioKey]);
+    if (step.audioKey) {
+      const customEntry = audioBankRef.current[step.audioKey];
+      playAudio(customEntry ? customEntry.url : audioMap[step.audioKey]);
     }
 
     if (step.type === 'button') {
@@ -147,5 +161,10 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
     language, setLanguage,
     steps, setSteps,
     start, stop, chooseBranch, handleButton, clearSessionLog,
+    audioBank:          audioBank.bank,
+    addAudioFile:       audioBank.addFile,
+    removeAudioFile:    audioBank.removeFile,
+    getAudioExportEntries: audioBank.getExportEntries,
+    importAudioEntries: audioBank.importEntries,
   };
 }

@@ -9,6 +9,7 @@ const LED_KEYS = [
   { key: 'hands_off', bit: 3, label: 'Hands off' },
   { key: 'low_belly', bit: 4, label: 'Low belly' },
   { key: 'breast',    bit: 5, label: 'Breast' },
+  { key: 'buzzer',    bit: 6, label: 'Buzzer' },
 ];
 
 export function ManualPanel({ ledMask, onToggleLed, onAllOff, onPlayAudio, disabled }) {
