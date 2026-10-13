@@ -16,10 +16,11 @@ const HOTSPOTS = [
 
 // Glow markers over the pad-placement illustration on the device front.
 // LED bits: hands_off=3, low_belly=4, breast=5 (see hooks/useBLE.js).
+// The pad positions blink to draw attention during "Elektroden plaatsen".
 const LED_MARKERS = [
   { key: 'hands_off', bit: 3, x: 69.2, y: 57.4, label: 'Handen af', size: 5, glow: '#e8862a' },
-  { key: 'breast',    bit: 5, x: 49.9, y: 49.5, label: 'Borst',     size: 2.5 },
-  { key: 'low_belly', bit: 4, x: 56.8, y: 56.0, label: 'Onderbuik', size: 2.5 },
+  { key: 'breast',    bit: 5, x: 49.9, y: 49.5, label: 'Borst',     size: 2.5, blink: true },
+  { key: 'low_belly', bit: 4, x: 56.8, y: 56.0, label: 'Onderbuik', size: 2.5, blink: true },
 ];
 
 export function AedDevicePanel({ ledMask, btnMask, expectedButton, onPressBtn, running }) {
@@ -76,12 +77,12 @@ export function AedDevicePanel({ ledMask, btnMask, expectedButton, onPressBtn, r
           );
         })}
 
-        {LED_MARKERS.map(({ key, bit, x, y, label, size, glow }) => {
+        {LED_MARKERS.map(({ key, bit, x, y, label, size, glow, blink }) => {
           const on = !!(ledMask & (1 << bit));
           return (
             <span
               key={key}
-              className={`led-marker${on ? ' on' : ''}`}
+              className={`led-marker${on ? ' on' : ''}${blink ? ' blink' : ''}`}
               style={{ left: `${x}%`, top: `${y}%`, width: `${size}%`, ...(glow ? { '--glow': glow } : {}) }}
               role="img"
               aria-label={`${label}: ${on ? 'aan' : 'uit'}`}
