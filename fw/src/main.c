@@ -31,6 +31,8 @@
 #include "ota.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
+#include <btstack_run_loop.h>
+#include <stdio.h>
 #ifdef LIB_PICO_STDIO_USB
 #include "pico/stdio_usb.h"
 #endif
@@ -64,6 +66,45 @@ void fatal(void) {
 }
 
 static void on_bt_up(void *context) { printf("Bluetooth stack is up\n"); }
+
+// --- Serial self-test commands (used to test the OTA flash path without
+// --- a BLE transport): "otatest <bytes>" and "otaapply <bytes>"
+static char _cmd_buf[64];
+static uint8_t _cmd_len = 0;
+static btstack_timer_source_t _serial_timer;
+
+static void serial_timer_cb(btstack_timer_source_t *ts) {
+  int c;
+  while ((c = getchar_timeout_us(0)) >= 0) {
+    if (c == '\n' || c == '\r') {
+      if (_cmd_len > 0) {
+        _cmd_buf[_cmd_len] = '\0';
+        unsigned long n = 0;
+        if (sscanf(_cmd_buf, "otatest %lu", &n) == 1 && n > 0) {
+          ota_selftest((uint32_t)n);
+        } else if (sscanf(_cmd_buf, "otaapply %lu", &n) == 1 && n > 0) {
+          ota_apply_selftest((uint32_t)n);
+        } else {
+          printf("commands: otatest <bytes>, otaapply <bytes>\n");
+        }
+        _cmd_len = 0;
+      }
+    } else if (_cmd_len < sizeof(_cmd_buf) - 1) {
+      _cmd_buf[_cmd_len++] = (char)c;
+    } else {
+      _cmd_len = 0; // overflowed — drop the line
+    }
+  }
+  btstack_run_loop_set_timer(ts, 100);
+  btstack_run_loop_add_timer(ts);
+}
+
+static void serial_commands_init(void) {
+  btstack_run_loop_set_timer(&_serial_timer, 100);
+  btstack_run_loop_set_timer_handler(&_serial_timer, serial_timer_cb);
+  btstack_run_loop_add_timer(&_serial_timer);
+}
+
 
 static void led_pins_init(void) {
   gpio_init(STATUS_LED_B_PIN);
@@ -115,6 +156,7 @@ int main(void) {
   led_pins_init();
 
   printf("Setup done\n");
+  serial_commands_init();
 
   bt_run();
 

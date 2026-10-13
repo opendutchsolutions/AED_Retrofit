@@ -28,4 +28,18 @@ void ota_init(void);
  */
 void ota_apply_check_and_run(void);
 
+/**
+ * @brief Serial self-test: stage `size` bytes of the running image into
+ *        the OTA staging area through the same flush path used during a
+ *        BLE update, then read back and compare. Prints PASS/FAIL.
+ */
+void ota_selftest(uint32_t size);
+
+/**
+ * @brief Serial self-test: write the apply record for the staged image
+ *        and reboot, so the boot-time apply path is exercised end-to-end.
+ *        Only call after a successful ota_selftest() with the full image.
+ */
+void ota_apply_selftest(uint32_t size);
+
 #endif

@@ -248,7 +248,11 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel,
       _conn_handle = HCI_CON_HANDLE_INVALID;
       _btn_notify_en = 0;
       btstack_run_loop_remove_timer(&_classic_reconnect_timer);
-      printf("[gatt] BLE disconnected\n");
+      // Reason codes of interest: 0x08 = supervision timeout (radio
+      // starved), 0x13 = remote terminated (client gave up), 0x16 =
+      // local host terminated (our stack dropped it)
+      printf("[gatt] BLE disconnected (reason 0x%02x)\n",
+             hci_event_disconnection_complete_get_reason(packet));
     }
     break;
   }

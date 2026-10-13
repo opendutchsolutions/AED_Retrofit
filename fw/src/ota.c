@@ -29,6 +29,7 @@
 #include <pico/bootrom.h>
 #include <pico/flash.h>
 #include <pico/sha256.h>
+#include <pico/time.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -84,6 +85,7 @@ static uint32_t _image_size = 0;
 static uint32_t _image_crc = 0;
 static uint32_t _received = 0;
 static uint32_t _buf_fill = 0;
+static uint32_t _sector_count = 0;
 static uint8_t _sector_buf[FLASH_SECTOR_SIZE_4K];
 static uint8_t _signature[64];
 static bool _have_signature = false;
@@ -199,13 +201,17 @@ static void ota_program_page(void *param) {
 // flash_safe_execute (interrupt-safe, works during BLE).
 static bool flush_sector(void) {
   _flush_param.offset = OTA_STAGING_BASE - XIP_BASE + _received;
+  uint32_t t0 = time_us_32();
   int rc = flash_safe_execute(ota_erase_sector, &_flush_param, 100);
   if (rc != PICO_OK) {
     printf("[ota] erase failed: %d\n", rc);
     return false;
   }
+  uint32_t t_erase = time_us_32() - t0;
+  _flush_param.buf_off = 0;
   for (uint32_t off = 0; off < FLASH_SECTOR_SIZE_4K; off += FLASH_PAGE_SIZE_256) {
     _flush_param.offset = OTA_STAGING_BASE - XIP_BASE + _received + off;
+    _flush_param.buf_off = off;
     rc = flash_safe_execute(ota_program_page, &_flush_param, 100);
     if (rc != PICO_OK) {
       printf("[ota] program failed: %d\n", rc);
@@ -214,6 +220,11 @@ static bool flush_sector(void) {
   }
   _received += _buf_fill;
   _buf_fill = 0;
+  _sector_count++;
+  if (_sector_count <= 3 || _sector_count % 8 == 0) {
+    printf("[ota] sector %u flushed (erase %lu us, total %lu us, %u bytes in)\n",
+           _sector_count, t_erase, time_us_32() - t0, _received);
+  }
   return true;
 }
 
@@ -348,6 +359,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _image_crc = total_crc; // CRC covers image bytes only (0..img_size)
     _received = 0;
     _buf_fill = 0;
+    _sector_count = 0;
     _have_signature = false;
     _error = OTA_ERR_NONE;
     _state = OTA_RECEIVING;
@@ -473,4 +485,72 @@ void ota_init(void) {
 
   printf("[ota] service ready (ctrl=%d data=%d, staging 0x%08x)\n",
          _handle_ctrl_value, _handle_data_value, OTA_STAGING_BASE);
+}
+
+void ota_selftest(uint32_t size) {
+  if (size == 0 || size > OTA_STAGING_SIZE) {
+    printf("[ota] selftest: invalid size %u\n", size);
+    return;
+  }
+  printf("[ota] selftest: staging %u bytes of the running image\n", size);
+  const uint8_t *src = (const uint8_t *)XIP_BASE;
+  _received = 0;
+  _buf_fill = 0;
+  _sector_count = 0;
+  uint32_t t0 = time_us_32();
+  while (_received + _buf_fill < size) {
+    uint32_t space = sizeof(_sector_buf) - _buf_fill;
+    uint32_t take = size - (_received + _buf_fill);
+    if (take > space) {
+      take = space;
+    }
+    memcpy(_sector_buf + _buf_fill, src + _received + _buf_fill, take);
+    _buf_fill += take;
+    if (_buf_fill == sizeof(_sector_buf)) {
+      if (!flush_sector()) {
+        printf("[ota] selftest FAILED: flush error at %u bytes\n", _received);
+        return;
+      }
+    }
+  }
+  if (_buf_fill > 0) {
+    memset(_sector_buf + _buf_fill, 0xFF, sizeof(_sector_buf) - _buf_fill);
+    if (!flush_sector()) {
+      printf("[ota] selftest FAILED: flush error at final sector\n");
+      return;
+    }
+  }
+  uint32_t ms = (time_us_32() - t0) / 1000;
+  printf("[ota] selftest: staged %u bytes in %lu ms (%u sectors)\n",
+         size, ms, _sector_count);
+  const uint8_t *staged = (const uint8_t *)OTA_STAGING_BASE;
+  uint32_t bad = 0;
+  for (uint32_t i = 0; i < size; i++) {
+    if (staged[i] != src[i]) {
+      bad++;
+    }
+  }
+  printf("[ota] selftest: readback %u/%u mismatching bytes\n", bad, size);
+  printf("[ota] selftest %s\n", bad == 0 ? "PASSED" : "FAILED");
+}
+
+void ota_apply_selftest(uint32_t size) {
+  if (size == 0 || size > OTA_STAGING_SIZE) {
+    printf("[ota] selftest apply: invalid size %u\n", size);
+    return;
+  }
+  uint32_t crc = crc32((const uint8_t *)OTA_STAGING_BASE, size);
+  ota_apply_record_t rec = {
+    .magic = OTA_APPLY_MAGIC,
+    .size = size,
+    .crc = crc,
+  };
+  int rc = kvs_set(KV_KEY_OTA_APPLY, &rec, sizeof(rec));
+  if (rc != KVSTORE_SUCCESS) {
+    printf("[ota] selftest apply: kvs_set failed (%s)\n", kvs_strerror(rc));
+    return;
+  }
+  printf("[ota] selftest apply: record written (size %u, crc 0x%08x), rebooting\n",
+         size, crc);
+  watchdog_reboot(0, 0, 0);
 }
