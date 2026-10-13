@@ -3,11 +3,13 @@ import { useBLE } from './hooks/useBLE';
 import { useAudio } from './hooks/useAudio';
 import { useSimulation } from './hooks/useSimulation';
 import { StatusChip, ConnectCard } from './components/StatusBar';
+import { DeviceSummary } from './components/DeviceSummary';
 import { ScenarioPanel } from './components/ScenarioPanel';
 import { AedDevicePanel } from './components/AedDevicePanel';
 import { HardwarePanel } from './components/HardwarePanel';
 import { ManualPanel } from './components/ManualPanel';
 import { SessionLog } from './components/SessionLog';
+import { OtaPanel } from './components/OtaPanel';
 import { ScenarioEditor } from './components/ScenarioEditor';
 import { Card, Btn } from './components/UI';
 
@@ -160,19 +162,27 @@ export default function App() {
                   available={ble.available}
                   error={ble.log.find(e => e.type === 'err')?.msg}
                 />
-                <Card>
-                  <h2>Geen apparaat beschikbaar?</h2>
-                  <p>
-                    Start de oefening zonder verbinding: het scenario draait dan volledig in de
-                    simulatiestand. Ga naar <strong>Oefenen</strong> en kies
-                    {' '}<strong>Start oefening (simulatie)</strong>.
-                  </p>
-                  <div className="button-row">
-                    <button className="button secondary" onClick={() => setScreen('oefenen')}>
-                      Naar Oefenen
-                    </button>
-                  </div>
-                </Card>
+                {connected ? (
+                  <DeviceSummary
+                    deviceName={ble.deviceName}
+                    classicStatus={ble.classicStatus}
+                    getDevice={ble.getDevice}
+                  />
+                ) : (
+                  <Card>
+                    <h2>Geen apparaat beschikbaar?</h2>
+                    <p>
+                      Start de oefening zonder verbinding: het scenario draait dan volledig in de
+                      simulatiestand. Ga naar <strong>Oefenen</strong> en kies
+                      {' '}<strong>Start oefening (simulatie)</strong>.
+                    </p>
+                    <div className="button-row">
+                      <button className="button secondary" onClick={() => setScreen('oefenen')}>
+                        Naar Oefenen
+                      </button>
+                    </div>
+                  </Card>
+                )}
               </div>
             </section>
           )}
@@ -241,6 +251,7 @@ export default function App() {
                   ledMask={ble.ledMask}
                 />
                 <SessionLog entries={sim.sessionLog} onClear={sim.clearSessionLog} />
+                <OtaPanel connected={connected} getDevice={ble.getDevice} />
               </div>
             </section>
           )}

@@ -30,15 +30,15 @@ export function ConnectCard({ status, deviceName, onConnect, onDisconnect, known
   return (
     <Card primary>
       <h2>Verbinden via Bluetooth</h2>
-      <p>Zet de oefen-AED aan en houd deze dichtbij.</p>
+      <p>Om te verbinden met Bluetooth volg deze stappen:</p>
       <ol className="steps">
         <li>Zet Bluetooth aan op dit apparaat.</li>
         <li>Zet de oefen-AED aan.</li>
-        <li>Kies hieronder <strong>Zoek oefen-AED</strong>.</li>
+        <li>Klik op <strong>Verbind met oefen-AED</strong>.</li>
       </ol>
       {!connected && (
         <Btn variant="primary" onClick={onConnect} disabled={status === 'scanning' || unavailable}>
-          Zoek oefen-AED
+          Verbind met oefen-AED
         </Btn>
       )}
       {connected && <Btn variant="secondary" onClick={onDisconnect}>Verbinding verbreken</Btn>}
