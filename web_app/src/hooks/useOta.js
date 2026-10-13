@@ -127,6 +127,13 @@ export function useOta({ getDevice }) {
       let chunk = 240;
       let withoutResponse = true;
       let lastReported = 0;
+      // The device stalls ~100-150 ms per 4 kB sector flush (flash erase
+      // with interrupts locked). Pausing at each 4 kB boundary gives it
+      // time to flush and drain HCI without incoming traffic pressure;
+      // without this the link drops a variable way into the transfer.
+      const FLASH_BLOCK = 4096;
+      const FLUSH_PAUSE_MS = 250;
+      let nextBoundary = FLASH_BLOCK;
       for (let off = 0, n = 0; off < blob.length; n++) {
         const part = blob.subarray(off, Math.min(off + chunk, blob.length));
         try {
@@ -155,6 +162,13 @@ export function useOta({ getDevice }) {
         }
         off += part.length;
         setProgress(off / blob.length);
+        if (off >= nextBoundary && off < blob.length) {
+          nextBoundary += FLASH_BLOCK;
+          await sleep(FLUSH_PAUSE_MS);
+          if (nextBoundary <= FLASH_BLOCK * 2) {
+            addLog(`Sectiepauze ${FLUSH_PAUSE_MS} ms per ${FLASH_BLOCK / 1024} kB — apparaat schrijft ondertussen naar flash`);
+          }
+        }
         if (off - lastReported >= blob.length / 10 || off === blob.length) {
           lastReported = off;
           addLog(`Overgebracht: ${Math.round(off / 1024)} / ${Math.round(blob.length / 1024)} kB (${Math.round(off / blob.length * 100)}%) [${elapsed()}]`);
