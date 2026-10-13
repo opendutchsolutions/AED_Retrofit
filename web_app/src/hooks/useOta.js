@@ -155,9 +155,12 @@ export function useOta({ getDevice, setOtaActive }) {
       // interrupts locked). Send one 4 kB block, then wait for its ACK
       // before sending the next — no HCI pressure builds up during a
       // flush, and the pace adapts to the actual flash speed.
-      const FLASH_BLOCK = 4096;
+      // Pacing knobs, overridable via URL for transfer debugging:
+      // ?otaPause=250&otaBlock=4096
+      const q = new URLSearchParams(location.search);
+      const FLASH_BLOCK = Number(q.get('otaBlock')) > 0 ? Number(q.get('otaBlock')) : 4096;
       const ACK_TIMEOUT_MS = 2000;
-      const FLUSH_PAUSE_MS = 250;
+      const FLUSH_PAUSE_MS = Number(q.get('otaPause')) >= 0 ? Number(q.get('otaPause')) : 250;
       const waitForAck = async (expected) => {
         const deadline = Date.now() + ACK_TIMEOUT_MS;
         while (ackCount < expected && Date.now() < deadline) {
