@@ -221,10 +221,8 @@ static bool flush_sector(void) {
   _received += _buf_fill;
   _buf_fill = 0;
   _sector_count++;
-  if (_sector_count <= 3 || _sector_count % 8 == 0) {
-    printf("[ota] sector %u flushed (erase %lu us, total %lu us, %u bytes in)\n",
-           _sector_count, t_erase, time_us_32() - t0, _received);
-  }
+  printf("[ota] sector %u flushed (erase %lu us, total %lu us, %u bytes in)\n",
+         _sector_count, t_erase, time_us_32() - t0, _received);
   return true;
 }
 
@@ -285,8 +283,16 @@ static void finish_transfer(void) {
 }
 
 static void handle_data(const uint8_t *buffer, uint16_t size) {
+  static uint32_t _write_count = 0;
+  _write_count++;
   if (_state != OTA_RECEIVING) {
+    printf("[ota] data outside transfer ignored (write #%u, %u bytes)\n",
+           _write_count, size);
     return; // ignore data outside a transfer
+  }
+  if (_write_count % 128 == 0) {
+    printf("[ota] write #%u (%u bytes, %u in)\n", _write_count, size,
+           _received + _buf_fill);
   }
   while (size > 0) {
     // Route bytes past the image into the signature buffer
