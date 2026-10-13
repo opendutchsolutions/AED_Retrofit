@@ -81,9 +81,16 @@ export function useOta({ getDevice }) {
       addLog(`Apparaat: ${dev.name || 'onbekend'}, GATT verbonden`);
 
       addLog('OTA-service opzoeken (0xFF20)…');
-      const svc  = await dev.gatt.getPrimaryService(SVC_UUID);
-      const ctrl = await svc.getCharacteristic(CTRL_UUID);
-      const data = await svc.getCharacteristic(DATA_UUID);
+      let svc, ctrl, data;
+      try {
+        svc  = await dev.gatt.getPrimaryService(SVC_UUID);
+        ctrl = await svc.getCharacteristic(CTRL_UUID);
+        data = await svc.getCharacteristic(DATA_UUID);
+      } catch (e) {
+        addLog(`Service of kenmerk niet gevonden: ${e?.message || e}`, 'err');
+        addLog('Tips: (1) zet Bluetooth op het iPhone/iPad kort uit en weer aan — iOS cachet de lijst met Bluetooth-services van dit apparaat en ziet zo nieuwe services pas na een cache-verversing; (2) verbind daarna opnieuw via de apparaatkeuze (Verbinden), niet via een opgeslagen verbinding.', 'warn');
+        throw e;
+      }
       addLog('Start- (0xFF21) en data-kenmerk (0xFF22) gevonden');
 
       let finalState = null;
