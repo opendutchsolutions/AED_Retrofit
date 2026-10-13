@@ -61,7 +61,16 @@ static btstack_packet_callback_registration_t _hci_registration;
 // A2DP audio link can be re-established after a reboot once BLE connects
 #define KV_KEY_CLASSIC_PEER "classic_peer"
 static volatile uint16_t _classic_con_handle = HCI_CON_HANDLE_INVALID;
+static bool _classic_peer_known = false;
 static bool _reconnect_pending = false;
+
+static void update_classic_status(void) {
+  uint8_t status = _classic_peer_known ? CLASSIC_STATUS_PEER_KNOWN : 0;
+  if (_classic_con_handle != HCI_CON_HANDLE_INVALID) {
+    status |= CLASSIC_STATUS_CONNECTED;
+  }
+  gatt_service_set_classic_status(status);
+}
 
 // General Discoverable, BR/EDR supported (dual-mode — must NOT be 0x06)
 #define APP_AD_FLAGS 0x02
@@ -132,6 +141,16 @@ static void packet_handler(uint8_t packet_type, uint16_t channel,
     }
 
     gatt_service_start_timer();
+    // Report whether a classic audio peer is stored (survives reboots)
+    {
+      bd_addr_t stored;
+      size_t value_size = 0;
+      _classic_peer_known =
+          (kvs_get(KV_KEY_CLASSIC_PEER, stored, sizeof(stored), &value_size) ==
+               KVSTORE_SUCCESS &&
+           value_size >= sizeof(bd_addr_t));
+    }
+    update_classic_status();
     _is_up = true;
     if (_cb)
       (*_cb)(_data);
@@ -154,6 +173,10 @@ static void packet_handler(uint8_t packet_type, uint16_t channel,
       int rc = kvs_set(KV_KEY_CLASSIC_PEER, address, sizeof(bd_addr_t));
       printf("[bt] classic peer %s stored (%s)\n", bd_addr_to_str(address),
              rc == KVSTORE_SUCCESS ? "ok" : kvs_strerror(rc));
+      if (rc == KVSTORE_SUCCESS) {
+        _classic_peer_known = true;
+      }
+      update_classic_status();
     }
     break;
   }
@@ -165,6 +188,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel,
       _classic_con_handle = HCI_CON_HANDLE_INVALID;
       _reconnect_pending = false;
       printf("[bt] Classic connection released\n");
+      update_classic_status();
     }
     break;
   }

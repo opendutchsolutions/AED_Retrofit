@@ -44,14 +44,19 @@ static const uint8_t BTN_PINS[] = {SHOCK_BUTTON_PIN, ON_OFF_BUTTON_PIN,
                                    PADS_INSERTED_PIN};
 #define NUM_BUTTONS ((uint8_t)(sizeof(BTN_PINS) / sizeof(BTN_PINS[0])))
 
+// Classic (BR/EDR) audio status byte — bits defined in gatt_service.h
 static volatile uint8_t _button_mask = 0;
 static volatile uint8_t _led_mask = 0;
+static volatile uint8_t _classic_status = 0;
 static volatile uint16_t _conn_handle = HCI_CON_HANDLE_INVALID;
 static volatile uint16_t _btn_notify_en = 0;
+static volatile uint16_t _classic_notify_en = 0;
 
 static uint16_t _handle_buttons_value = 0;
 static uint16_t _handle_buttons_cccd = 0;
 static uint16_t _handle_leds_value = 0;
+static uint16_t _handle_classic_status_value = 0;
+static uint16_t _handle_classic_status_cccd = 0;
 static uint16_t _handle_service_start = 0;
 static uint16_t _handle_service_end = 0;
 
@@ -63,6 +68,7 @@ static bool _timers_running = false;
 static volatile hci_con_handle_t _pending_param_handle = HCI_CON_HANDLE_INVALID;
 
 static btstack_context_callback_registration_t _notify_reg;
+static btstack_context_callback_registration_t _classic_notify_reg;
 
 static void conn_param_timer_cb(btstack_timer_source_t *ts) {
   UNUSED(ts);
@@ -94,6 +100,12 @@ static void do_notify(void *context) {
   UNUSED(context);
   uint8_t mask = _button_mask; // Local copy avoids volatile warning
   att_server_notify(_conn_handle, _handle_buttons_value, &mask, 1);
+}
+
+static void do_classic_notify(void *context) {
+  UNUSED(context);
+  uint8_t status = _classic_status; // Local copy avoids volatile warning
+  att_server_notify(_conn_handle, _handle_classic_status_value, &status, 1);
 }
 
 static void btn_timer_cb(btstack_timer_source_t *ts) {
@@ -133,6 +145,12 @@ static uint16_t service_read_cb(hci_con_handle_t con_handle,
     }
     return 1;
   }
+  if (attribute_handle == _handle_classic_status_value) {
+    if (buffer) {
+      buffer[0] = _classic_status;
+    }
+    return 1;
+  }
   return 0;
 }
 
@@ -150,6 +168,14 @@ static int service_write_cb(hci_con_handle_t con_handle,
     }
     printf("[gatt] button notify %s\n",
            _btn_notify_en ? "enabled" : "disabled");
+    return 0;
+  }
+  if (attribute_handle == _handle_classic_status_cccd) {
+    if (buffer_size >= 2) {
+      _classic_notify_en = little_endian_read_16(buffer, 0);
+    }
+    printf("[gatt] classic status notify %s\n",
+           _classic_notify_en ? "enabled" : "disabled");
     return 0;
   }
   if (attribute_handle == _handle_leds_value) {
@@ -243,7 +269,14 @@ void gatt_service_init(void) {
           ATT_PROPERTY_WRITE_WITHOUT_RESPONSE | ATT_PROPERTY_DYNAMIC,
       ATT_SECURITY_NONE, ATT_SECURITY_NONE, NULL, 0);
 
-  _handle_service_end = _handle_leds_value;
+  // Classic (BR/EDR) audio status — tells the web app whether the device
+  // knows a classic audio peer and whether the classic link is up
+  _handle_classic_status_value = att_db_util_add_characteristic_uuid16(
+      0xFF13, ATT_PROPERTY_READ | ATT_PROPERTY_NOTIFY | ATT_PROPERTY_DYNAMIC,
+      ATT_SECURITY_NONE, ATT_SECURITY_NONE, NULL, 0);
+  _handle_classic_status_cccd = _handle_classic_status_value + 1;
+
+  _handle_service_end = _handle_classic_status_cccd;
 
   // Register ATT server
   att_server_init(att_db_util_get_address(), NULL, NULL);
@@ -269,8 +302,26 @@ void gatt_service_start_timer(void) {
   btstack_run_loop_set_timer_handler(&_btn_timer, btn_timer_cb);
   btstack_run_loop_add_timer(&_btn_timer);
 
-  printf("[gatt] started (btn=%d cccd=%d led=%d)\n", _handle_buttons_value,
-         _handle_buttons_cccd, _handle_leds_value);
+  printf("[gatt] started (btn=%d cccd=%d led=%d classic=%d)\n",
+         _handle_buttons_value, _handle_buttons_cccd, _handle_leds_value,
+         _handle_classic_status_value);
+}
+
+void gatt_service_set_classic_status(uint8_t status) {
+  status &= (CLASSIC_STATUS_PEER_KNOWN | CLASSIC_STATUS_CONNECTED);
+  if (status == _classic_status) {
+    return;
+  }
+  _classic_status = status;
+  printf("[gatt] classic status -> 0x%02x\n", _classic_status);
+  if (_conn_handle != HCI_CON_HANDLE_INVALID &&
+      (_classic_notify_en &
+       GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION)) {
+    _classic_notify_reg.callback = &do_classic_notify;
+    _classic_notify_reg.context = NULL;
+    att_server_request_to_send_notification(&_classic_notify_reg,
+                                             _conn_handle);
+  }
 }
 
 uint8_t gatt_service_get_leds(void) { return _led_mask; }
