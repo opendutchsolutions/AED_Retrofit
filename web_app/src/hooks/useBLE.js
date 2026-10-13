@@ -173,6 +173,8 @@ export function useBLE({ onButtonChange } = {}) {
     deviceRef.current?.gatt?.disconnect();
   }, []);
 
+  const getDevice = useCallback(() => deviceRef.current, []);
+
   const writeLeds = useCallback(async (mask) => {
     const clamped = mask & 0x7f;  // 7 bits: 6 LEDs + buzzer
     ledMaskRef.current = clamped;
@@ -210,7 +212,7 @@ export function useBLE({ onButtonChange } = {}) {
 
   return {
     status, deviceName, ledMask, btnMask, log, knownDevices, available, classicStatus,
-    connect, disconnect, reconnect,
+    connect, disconnect, reconnect, getDevice,
     setLed, setLedMask, allLedsOff, writeLeds,
     simulateButton, addLog,
   };
