@@ -490,3 +490,10 @@ void a2dp_sink_begin(void) {
       sizeof(_sbc_capabilities), sbc_configuration, sizeof(sbc_configuration));
   _seid = avdtp_local_seid(endpoint);
 }
+
+uint8_t a2dp_sink_connect_peer(bd_addr_t remote) {
+  uint16_t a2dp_cid = 0;
+  uint8_t status = a2dp_sink_establish_stream(remote, &a2dp_cid);
+  printf("[a2dp] outgoing connect status=0x%02x\n", status);
+  return status;
+}

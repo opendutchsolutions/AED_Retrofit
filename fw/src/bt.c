@@ -31,12 +31,16 @@
  * - Added SDP, SM (Security Manager) and GATT service initialization
  * - Added debug logging for Classic BT connection request and complete events
  * - Added startup logging of local BD address
+ * - Added automatic classic audio reconnect on BLE connect, with the peer
+ *   address persisted in the pico-kvstore (bt_reconnect_classic /
+ *   bt_classic_connected)
  */
 
 #include "bt.h"
 #include "a2dp.h"
 #include "avrcp.h"
 #include "gatt_service.h"
+#include "kvstore.h"
 #include "l2cap.h"
 #include "sdp.h"
 #include <btstack_event.h>
@@ -52,6 +56,12 @@ static void *_data = 0;
 static const char *_name = 0;
 static const char *_pin = 0;
 static btstack_packet_callback_registration_t _hci_registration;
+
+// Last Classic (BR/EDR) peer — persisted in the key-value store so the
+// A2DP audio link can be re-established after a reboot once BLE connects
+#define KV_KEY_CLASSIC_PEER "classic_peer"
+static volatile uint16_t _classic_con_handle = HCI_CON_HANDLE_INVALID;
+static bool _reconnect_pending = false;
 
 // General Discoverable, BR/EDR supported (dual-mode — must NOT be 0x06)
 #define APP_AD_FLAGS 0x02
@@ -131,10 +141,33 @@ static void packet_handler(uint8_t packet_type, uint16_t channel,
     printf("[bt] Classic connection request\n");
     break;
 
-  case HCI_EVENT_CONNECTION_COMPLETE:
+  case HCI_EVENT_CONNECTION_COMPLETE: {
     printf("[bt] Classic connection complete, status=0x%02x\n",
            hci_event_connection_complete_get_status(packet));
+    hci_event_connection_complete_get_bd_addr(packet, address);
+    _reconnect_pending = false;
+    if (hci_event_connection_complete_get_status(packet) == ERROR_CODE_SUCCESS) {
+      _classic_con_handle =
+          hci_event_connection_complete_get_connection_handle(packet);
+      // Persist the peer address so the classic audio link can be restored
+      // after a reboot (kv-store survives the watchdog reset)
+      int rc = kvs_set(KV_KEY_CLASSIC_PEER, address, sizeof(bd_addr_t));
+      printf("[bt] classic peer %s stored (%s)\n", bd_addr_to_str(address),
+             rc == KVSTORE_SUCCESS ? "ok" : kvs_strerror(rc));
+    }
     break;
+  }
+
+  case HCI_EVENT_DISCONNECTION_COMPLETE: {
+    uint16_t handle =
+        hci_event_disconnection_complete_get_connection_handle(packet);
+    if (handle == _classic_con_handle) {
+      _classic_con_handle = HCI_CON_HANDLE_INVALID;
+      _reconnect_pending = false;
+      printf("[bt] Classic connection released\n");
+    }
+    break;
+  }
 
   case HCI_EVENT_PIN_CODE_REQUEST:
     hci_event_pin_code_request_get_bd_addr(packet, address);
@@ -181,6 +214,32 @@ void bt_begin(const char *name, const char *pin, bt_on_up_cb_t cb, void *data) {
 void bt_run(void) {
   hci_power_control(HCI_POWER_ON);
   btstack_run_loop_execute();
+}
+
+void bt_reconnect_classic(void) {
+  if (!_is_up || _reconnect_pending)
+    return;
+  if (_classic_con_handle != HCI_CON_HANDLE_INVALID)
+    return; // Classic link already up
+
+  // Look up the classic audio peer in persistent storage
+  bd_addr_t peer;
+  size_t value_size = 0;
+  int rc = kvs_get(KV_KEY_CLASSIC_PEER, peer, sizeof(peer), &value_size);
+  if (rc != KVSTORE_SUCCESS || value_size < sizeof(bd_addr_t)) {
+    printf("[bt] no classic peer in storage (%s)\n",
+           rc == KVSTORE_SUCCESS ? "empty" : kvs_strerror(rc));
+    return;
+  }
+
+  uint8_t status = a2dp_sink_connect_peer(peer);
+  printf("[bt] classic audio reconnect to %s -> status=0x%02x\n",
+         bd_addr_to_str(peer), status);
+  _reconnect_pending = (status == ERROR_CODE_SUCCESS);
+}
+
+bool bt_classic_connected(void) {
+  return _classic_con_handle != HCI_CON_HANDLE_INVALID;
 }
 
 bool bt_up(void) { return _is_up; }

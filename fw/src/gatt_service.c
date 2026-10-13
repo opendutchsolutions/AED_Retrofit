@@ -25,6 +25,7 @@
 
 #include "gatt_service.h"
 #include "board_config.h"
+#include "bt.h"
 
 #include <ble/att_db_util.h>
 #include <ble/att_server.h>
@@ -184,14 +185,21 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel,
       btstack_run_loop_set_timer_handler(&_conn_param_timer,
                                          conn_param_timer_cb);
       btstack_run_loop_add_timer(&_conn_param_timer);
+      // BLE (control) connect also restores the Classic audio link
+      bt_reconnect_classic();
     }
     break;
 
-  case HCI_EVENT_DISCONNECTION_COMPLETE:
-    _conn_handle = HCI_CON_HANDLE_INVALID;
-    _btn_notify_en = 0;
-    printf("[gatt] BLE disconnected\n");
+  case HCI_EVENT_DISCONNECTION_COMPLETE: {
+    uint16_t handle =
+        hci_event_disconnection_complete_get_connection_handle(packet);
+    if (handle == _conn_handle) {
+      _conn_handle = HCI_CON_HANDLE_INVALID;
+      _btn_notify_en = 0;
+      printf("[gatt] BLE disconnected\n");
+    }
     break;
+  }
 
   default:
     break;

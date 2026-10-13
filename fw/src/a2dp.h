@@ -26,9 +26,19 @@
 #ifndef a2dp_h
 #define a2dp_h
 
+#include <bluetooth.h>
+#include <stdint.h>
+
 /**
  * @brief Initializes the A2DP Bluetooth Audio Layer
  */
 void a2dp_sink_begin();
+
+/**
+ * @brief Establish an outgoing A2DP stream to a previously paired source
+ * @param remote BD address of the audio source (e.g. the instructor PC)
+ * @return ERROR_CODE_SUCCESS when the connection attempt was started
+ */
+uint8_t a2dp_sink_connect_peer(bd_addr_t remote);
 
 #endif

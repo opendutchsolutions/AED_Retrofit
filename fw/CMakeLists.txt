@@ -78,6 +78,53 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR} # For btstack config
 )
 
+# --- pico-kvstore (vendored under lib/pico-kvstore, BSD-3-Clause) ---
+# The upstream CMakeLists are standalone projects (they call pico_sdk_init()),
+# so define the library targets here directly, mirroring their definitions.
+set(KVSTORE_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/pico-kvstore)
+set(PICO_VFS_DIR ${KVSTORE_DIR}/lib/pico-vfs)
+
+add_library(blockdevice INTERFACE)
+target_include_directories(blockdevice INTERFACE ${PICO_VFS_DIR}/include)
+
+add_library(blockdevice_flash INTERFACE)
+target_sources(blockdevice_flash INTERFACE ${PICO_VFS_DIR}/src/blockdevice/flash.c)
+target_link_libraries(blockdevice_flash INTERFACE
+    blockdevice
+    hardware_exception
+    hardware_flash
+    pico_sync
+    pico_flash
+)
+
+add_library(kvstore INTERFACE)
+target_sources(kvstore INTERFACE ${KVSTORE_DIR}/src/kvstore.c)
+target_include_directories(kvstore INTERFACE ${KVSTORE_DIR}/include)
+
+add_library(kvstore_logkvs INTERFACE)
+target_sources(kvstore_logkvs INTERFACE
+    ${KVSTORE_DIR}/src/kvstore_logkvs.c
+    ${KVSTORE_DIR}/src/blockdevice_stage.c
+    ${KVSTORE_DIR}/src/crc32_ansi.c
+)
+target_include_directories(kvstore_logkvs INTERFACE ${KVSTORE_DIR}/include)
+target_link_libraries(kvstore_logkvs INTERFACE
+    kvstore
+    blockdevice
+)
+
+add_library(kvstore_default INTERFACE)
+target_sources(kvstore_default INTERFACE ${KVSTORE_DIR}/src/kvs_init.c)
+target_include_directories(kvstore_default INTERFACE ${KVSTORE_DIR}/include)
+target_link_libraries(kvstore_default INTERFACE
+    kvstore
+    kvstore_logkvs
+    blockdevice_flash
+    pico_btstack_flash_bank_headers
+)
+
+target_link_libraries(${PROJECT_NAME} kvstore_default)
+
 pico_add_extra_outputs(${PROJECT_NAME})
 # pico_enable_stdio_usb(${PROJECT_NAME} 1)
 # pico_enable_stdio_uart(${PROJECT_NAME} 0)
