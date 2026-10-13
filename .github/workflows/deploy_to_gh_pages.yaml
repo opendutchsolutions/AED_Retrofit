@@ -31,7 +31,7 @@ jobs:
       - name: Restore signing key
         env:
           FW_SIGNING_KEY: ${{ secrets.FW_SIGNING_KEY }}
-        run: printf '%s\n' "$FW_SIGNING_KEY" > fw/signing_key.pem
+        run: printf '%s\n' "$FW_SIGNING_KEY" > fw/ota_signing_key.pem
 
       - name: Build, hash & sign firmware
         run: |
@@ -41,8 +41,12 @@ jobs:
             -DPICO_BOARD=pico2_w \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build fw/build
+          openssl dgst -sha256 -sign fw/ota_signing_key.pem \
+            -out fw/build/picow-a2dp.sig.der fw/build/picow-a2dp.bin
+          python3 fw/sig-der-to-raw.py fw/build/picow-a2dp.sig.der fw/build/picow-a2dp.sig
           mkdir -p web_app/public/firmware
           cp fw/build/picow-a2dp.uf2 web_app/public/firmware/picow-a2dp.uf2
+          cp fw/build/picow-a2dp.sig web_app/public/firmware/picow-a2dp.sig
 
       # --- Site: build and deploy (includes the signed firmware file)
       - name: Setup Node
