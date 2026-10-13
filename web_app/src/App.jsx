@@ -12,9 +12,9 @@ import { ScenarioEditor } from './components/ScenarioEditor';
 import { Card, Btn } from './components/UI';
 
 const SCREENS = [
-  { key: 'verbinden',  label: 'Verbinden',  eyebrow: 'Stap 1' },
-  { key: 'oefenen',    label: 'Oefenen',     eyebrow: 'Stap 2' },
-  { key: 'afronden',   label: 'Afronden',    eyebrow: 'Stap 3' },
+  { key: 'verbinden',  label: 'Verbind met een apparaat',  eyebrow: 'Stap 1' },
+  { key: 'oefenen',    label: 'Begin met oefenen',     eyebrow: 'Stap 2' },
+  { key: 'afronden',   label: 'Rond de oefening af',    eyebrow: 'Stap 3' },
 ];
 
 const HERO_TEXT = {
@@ -23,8 +23,8 @@ const HERO_TEXT = {
     text: 'Maak verbinding via Bluetooth. Heb je geen oefen-AED bij de hand? Gebruik dan de simulatiestand.',
   },
   oefenen: {
-    title: 'Start een oefenscenario',
-    text: 'Kies de taal en start het scenario. Zonder apparaat draait de oefening in de simulatiestand.',
+    title: 'Start met oefenen',
+    text: '',
   },
   afronden: {
     title: 'Rond de oefening af',
@@ -80,7 +80,7 @@ function DeviceStatusCard({ status, deviceName, running, ledMask }) {
 
 export default function App() {
   const [screen, setScreen] = useState('verbinden');
-  const { play: playAudio } = useAudio();
+  const { play: playAudio, stop: stopAudio } = useAudio();
 
   // Forward ref so BLE hook can call into sim without circular dependency
   const simRef = useRef(null);
@@ -95,6 +95,7 @@ export default function App() {
     allLedsOff: ble.allLedsOff,
     addLog: ble.addLog,
     playAudio,
+    stopAudio,
   });
   simRef.current = sim;
 

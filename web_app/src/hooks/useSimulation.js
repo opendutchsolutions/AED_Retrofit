@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { DEFAULT_STEPS, AUDIO_FILES, buildStepMap, ledMaskFromObj } from '../scenario/default';
 import { useAudioBank } from './useAudioBank';
 
-export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
+export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio, stopAudio }) {
   const [running, setRunning]       = useState(false);
   const [currentStepId, setCurrentStepId] = useState(null);
   const [waitingBranch, setWaitingBranch] = useState(false);
@@ -68,11 +68,14 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
       }, step.buzzer_duration_ms);
     }
 
-    // Play audio — custom bank takes priority over built-in files
+    // Play audio — custom bank takes priority over built-in files.
+    // Steps without audio stop whatever is still playing.
     const audioMap = AUDIO_FILES[language] || AUDIO_FILES['Nederlands'];
     if (step.audioKey) {
       const customEntry = audioBankRef.current[step.audioKey];
       playAudio(customEntry ? customEntry.url : audioMap[step.audioKey]);
+    } else {
+      stopAudio?.();
     }
 
     if (step.type === 'button') {
@@ -122,7 +125,7 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
       setRunning(false);
       logSession('Scenario complete', 'ok');
     }
-  }, [clearTimers, setLedMask, allLedsOff, playAudio, language, logSession, addLog]);
+  }, [clearTimers, setLedMask, allLedsOff, playAudio, stopAudio, language, logSession, addLog]);
 
   const start = useCallback(() => {
     setSessionLog([]);
@@ -133,12 +136,13 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
 
   const stop = useCallback(() => {
     clearTimers();
+    stopAudio?.();
     setRunning(false);
     setCurrentStepId(null);
     setWaitingBranch(false);
     allLedsOff();
     logSession('Session stopped', 'err');
-  }, [clearTimers, allLedsOff, logSession]);
+  }, [clearTimers, stopAudio, allLedsOff, logSession]);
 
   const chooseBranch = useCallback((nextId) => {
     setWaitingBranch(false);
