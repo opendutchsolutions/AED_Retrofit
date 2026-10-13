@@ -27,8 +27,8 @@ jobs:
 
       - name: Checkout pico-sdk and pico-extras
         run: |
-          git clone --depth 1 --branch 2.2.0 https://github.com/raspberrypi/pico-sdk.git "$HOME/pico-sdk"
-          git clone --depth 1 https://github.com/raspberrypi/pico-extras.git "$HOME/pico-extras"
+          git clone --depth 1 --branch 2.2.0 --recursive --shallow-submodules https://github.com/raspberrypi/pico-sdk.git "$HOME/pico-sdk"
+          git clone --depth 1 --recursive --shallow-submodules https://github.com/raspberrypi/pico-extras.git "$HOME/pico-extras"
 
       - name: Restore signing key
         env:
