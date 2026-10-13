@@ -1,14 +1,19 @@
 import React, { useState } from 'react';
 import { Card, Btn } from './UI';
 import { parseUf2, useOta } from '../hooks/useOta';
+import { FIRMWARE_URL, SIGNATURE_URL, isNewer, fetchServerVersion } from '../firmware';
 
-// Served by the firmware workflow (fw → web_app/public/firmware)
-const FIRMWARE_URL = `${import.meta.env.BASE_URL}firmware/picow-a2dp.uf2`;
-const SIGNATURE_URL = `${import.meta.env.BASE_URL}firmware/picow-a2dp.sig`;
-
-export function OtaPanel({ connected, getDevice }) {
+export function OtaPanel({ connected, fwVersion, getDevice }) {
   const { busy, status, progress, run, setStatus } = useOta({ getDevice });
   const [fetching, setFetching] = useState(false);
+  const [serverVersion, setServerVersion] = useState(null);
+
+  React.useEffect(() => {
+    fetchServerVersion().then(setServerVersion);
+  }, []);
+
+  const updateAvailable = isNewer(serverVersion, fwVersion);
+  const versionKnown = Boolean(serverVersion && fwVersion);
 
   async function startOta() {
     setFetching(true);
@@ -34,17 +39,29 @@ export function OtaPanel({ connected, getDevice }) {
   return (
     <Card className="log-card">
       <h2>Firmware-update (OTA)</h2>
-      <p className="hint">
-        Haalt de nieuwste, ondertekende firmware op van de server en stuurt
-        die draadloos naar de oefen-AED. Het apparaat controleert de
-        handtekening en start daarna zelf opnieuw op. Verbreek de verbinding
-        niet tijdens de update.
-      </p>
-      <div className="button-row" style={{ marginTop: '.8rem' }}>
-        <Btn variant="primary" onClick={startOta} disabled={inProgress || !connected}>
-          {inProgress ? 'Bezig met bijwerken…' : 'Firmware bijwerken'}
-        </Btn>
-      </div>
+      <dl className="summary-list">
+        <div><dt>Geïnstalleerde versie</dt><dd>{fwVersion || 'Onbekend'}</dd></div>
+        <div><dt>Beschikbare versie</dt><dd>{serverVersion || 'Onbekend'}</dd></div>
+      </dl>
+      {versionKnown && !updateAvailable ? (
+        <p className="message" role="status" style={{ marginBottom: 0 }}>
+          Firmware is actueel.
+        </p>
+      ) : (
+        <>
+          <p className="hint">
+            Haalt de nieuwste, ondertekende firmware op van de server en stuurt
+            die draadloos naar de oefen-AED. Het apparaat controleert de
+            handtekening en start daarna zelf opnieuw op. Verbreek de verbinding
+            niet tijdens de update.
+          </p>
+          <div className="button-row" style={{ marginTop: '.8rem' }}>
+            <Btn variant="primary" onClick={startOta} disabled={inProgress || !connected}>
+              {inProgress ? 'Bezig met bijwerken…' : 'Firmware bijwerken'}
+            </Btn>
+          </div>
+        </>
+      )}
       {progress != null && (
         <div
           style={{ background: '#eef1f4', borderRadius: '.35rem', height: '12px',

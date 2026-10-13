@@ -23,9 +23,11 @@
 #include <ble/att_db_util.h>
 #include <ble/att_server.h>
 #include <btstack.h>
+#include <hardware/flash.h>
 #include <hardware/watchdog.h>
 #include <pico.h>
 #include <pico/bootrom.h>
+#include <pico/flash.h>
 #include <pico/sha256.h>
 #include <stdio.h>
 #include <string.h>
@@ -174,30 +176,39 @@ static bool verify_signature(void) {
   return uECC_verify(OTA_PUB_KEY, hash.bytes, _signature) == 1;
 }
 
-// Erase + program one buffered sector of the staging area using the
-// ROM flash API (safe to call while running from flash).
+typedef struct {
+  uint32_t offset;
+} ota_flash_param_t;
+
+static ota_flash_param_t _flush_param;
+
+static void ota_erase_sector(void *param) {
+  const ota_flash_param_t *p = param;
+  flash_range_erase(p->offset, FLASH_SECTOR_SIZE_4K);
+}
+
+static void ota_program_page(void *param) {
+  // _sector_buf is static; program at _flush_param.offset + page offset
+  // (the param is the full struct, buffer accessed via the static)
+  const ota_flash_param_t *p = param;
+  flash_range_program(p->offset, _sector_buf + (p->offset - OTA_STAGING_BASE - _received),
+                       FLASH_PAGE_SIZE_256);
+}
+
+// Erase + program one buffered sector of the staging area using
+// flash_safe_execute (interrupt-safe, works during BLE).
 static bool flush_sector(void) {
-  struct cflash_flags flags;
-  int8_t ret;
-  flags.flags =
-      (CFLASH_OP_VALUE_ERASE << CFLASH_OP_LSB) |
-      (CFLASH_SECLEVEL_VALUE_SECURE << CFLASH_SECLEVEL_LSB) |
-      (CFLASH_ASPACE_VALUE_STORAGE << CFLASH_ASPACE_LSB);
-  ret = rom_flash_op(flags, OTA_STAGING_BASE + _received,
-                     FLASH_SECTOR_SIZE_4K, NULL);
-  if (ret != 0) {
-    printf("[ota] erase failed: %d\n", ret);
+  _flush_param.offset = OTA_STAGING_BASE - XIP_BASE + _received;
+  int rc = flash_safe_execute(ota_erase_sector, &_flush_param, 100);
+  if (rc != PICO_OK) {
+    printf("[ota] erase failed: %d\n", rc);
     return false;
   }
   for (uint32_t off = 0; off < FLASH_SECTOR_SIZE_4K; off += FLASH_PAGE_SIZE_256) {
-    flags.flags =
-        (CFLASH_OP_VALUE_PROGRAM << CFLASH_OP_LSB) |
-        (CFLASH_SECLEVEL_VALUE_SECURE << CFLASH_SECLEVEL_LSB) |
-        (CFLASH_ASPACE_VALUE_STORAGE << CFLASH_ASPACE_LSB);
-    ret = rom_flash_op(flags, OTA_STAGING_BASE + _received + off,
-                       FLASH_PAGE_SIZE_256, _sector_buf + off);
-    if (ret != 0) {
-      printf("[ota] program failed: %d\n", ret);
+    _flush_param.offset = OTA_STAGING_BASE - XIP_BASE + _received + off;
+    rc = flash_safe_execute(ota_program_page, &_flush_param, 100);
+    if (rc != PICO_OK) {
+      printf("[ota] program failed: %d\n", rc);
       return false;
     }
   }

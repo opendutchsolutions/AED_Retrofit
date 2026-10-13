@@ -1,10 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Btn } from './UI';
 import { parseUf2, useOta } from '../hooks/useOta';
-
-// Served by the firmware workflow (fw → web_app/public/firmware)
-const FIRMWARE_URL = `${import.meta.env.BASE_URL}firmware/picow-a2dp.uf2`;
-const SIGNATURE_URL = `${import.meta.env.BASE_URL}firmware/picow-a2dp.sig`;
+import { FIRMWARE_URL, SIGNATURE_URL, isNewer, fetchServerVersion } from '../firmware';
 
 function classicText(classicStatus) {
   if (classicStatus === null) return 'Onbekend';
@@ -15,9 +12,17 @@ function classicText(classicStatus) {
   return 'Niet gekoppeld';
 }
 
-export function DeviceSummary({ deviceName, classicStatus, getDevice }) {
+export function DeviceSummary({ deviceName, classicStatus, fwVersion, getDevice }) {
   const { busy, status, progress, run, setStatus } = useOta({ getDevice });
   const [fetching, setFetching] = useState(false);
+  const [serverVersion, setServerVersion] = useState(null);
+
+  // Fetch the available firmware version once, to decide if an update exists
+  React.useEffect(() => {
+    fetchServerVersion().then(setServerVersion);
+  }, []);
+
+  const updateAvailable = isNewer(serverVersion, fwVersion);
 
   async function updateFirmware() {
     setFetching(true);
@@ -50,11 +55,28 @@ export function DeviceSummary({ deviceName, classicStatus, getDevice }) {
       </dl>
 
       <h3 style={{ marginTop: '1rem', marginBottom: '.5rem' }}>Firmware</h3>
-      <div className="button-row">
-        <Btn variant="primary" onClick={updateFirmware} disabled={inProgress}>
-          {inProgress ? 'Bezig met bijwerken…' : 'Firmware bijwerken'}
-        </Btn>
-      </div>
+      <dl className="summary-list">
+        <div><dt>Geïnstalleerde versie</dt><dd>{fwVersion || 'Onbekend'}</dd></div>
+        <div><dt>Beschikbare versie</dt><dd>{serverVersion || 'Onbekend'}</dd></div>
+      </dl>
+      {updateAvailable ? (
+        <>
+          <div className="button-row">
+            <Btn variant="primary" onClick={updateFirmware} disabled={inProgress}>
+              {inProgress ? 'Bezig met bijwerken…' : 'Firmware bijwerken'}
+            </Btn>
+          </div>
+          <p className="hint">
+            De nieuwste, ondertekende firmware wordt opgehaald van de server en
+            draadloos naar de oefen-AED gestuurd. Het apparaat controleert de
+            handtekening en start daarna zelf opnieuw op.
+          </p>
+        </>
+      ) : (
+        <p className="message" role="status" style={{ marginBottom: 0 }}>
+          Firmware is actueel.
+        </p>
+      )}
       {progress != null && (
         <div
           style={{ background: '#eef1f4', borderRadius: '.35rem', height: '12px',
@@ -75,11 +97,6 @@ export function DeviceSummary({ deviceName, classicStatus, getDevice }) {
       {status && (
         <p className="message" role="status" style={{ marginBottom: 0 }}>{status}</p>
       )}
-      <p className="hint">
-        De nieuwste, ondertekende firmware wordt opgehaald van de server en
-        draadloos naar de oefen-AED gestuurd. Het apparaat controleert de
-        handtekening en start daarna zelf opnieuw op.
-      </p>
     </Card>
   );
 }

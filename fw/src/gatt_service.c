@@ -30,6 +30,7 @@
 #include <ble/att_db_util.h>
 #include <ble/att_server.h>
 #include <btstack.h>
+#include <string.h>
 #include <hardware/gpio.h>
 #include <stdio.h>
 
@@ -57,6 +58,7 @@ static uint16_t _handle_buttons_cccd = 0;
 static uint16_t _handle_leds_value = 0;
 static uint16_t _handle_classic_status_value = 0;
 static uint16_t _handle_classic_status_cccd = 0;
+static uint16_t _handle_fw_version_value = 0;
 static uint16_t _handle_service_start = 0;
 static uint16_t _handle_service_end = 0;
 
@@ -160,6 +162,15 @@ static uint16_t service_read_cb(hci_con_handle_t con_handle,
       buffer[0] = _classic_status;
     }
     return 1;
+  }
+  if (attribute_handle == _handle_fw_version_value) {
+    const char *ver = FW_VERSION;
+    uint16_t len = (uint16_t)strlen(ver);
+    if (buffer) {
+      uint16_t take = (buffer_size < len) ? buffer_size : len;
+      memcpy(buffer, ver, take);
+    }
+    return len;
   }
   return 0;
 }
@@ -291,7 +302,12 @@ void gatt_service_init(void) {
       ATT_SECURITY_NONE, ATT_SECURITY_NONE, NULL, 0);
   _handle_classic_status_cccd = _handle_classic_status_value + 1;
 
-  _handle_service_end = _handle_classic_status_cccd;
+  // Firmware version string (read only) — e.g. "1.0.0"
+  _handle_fw_version_value = att_db_util_add_characteristic_uuid16(
+      0xFF14, ATT_PROPERTY_READ | ATT_PROPERTY_DYNAMIC,
+      ATT_SECURITY_NONE, ATT_SECURITY_NONE, NULL, 0);
+
+  _handle_service_end = _handle_fw_version_value;
 
   // Register ATT server
   att_server_init(att_db_util_get_address(), NULL, NULL);

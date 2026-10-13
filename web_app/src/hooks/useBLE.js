@@ -4,6 +4,7 @@ const SVC     = '0000ff10-0000-1000-8000-00805f9b34fb';
 const CBTNS   = '0000ff11-0000-1000-8000-00805f9b34fb';
 const CLEDS   = '0000ff12-0000-1000-8000-00805f9b34fb';
 const CSTATUS = '0000ff13-0000-1000-8000-00805f9b34fb';
+const CVERSION = '0000ff14-0000-1000-8000-00805f9b34fb';
 
 export const LED_BITS = { shock:0, on_off:1, info:2, hands_off:3, low_belly:4, breast:5, buzzer:6 };
 export const BTN_BITS = { shock:0, on_off:1, info:2, card_slot:3, pads_inserted:4 };
@@ -14,6 +15,7 @@ export function useBLE({ onButtonChange } = {}) {
   const [ledMask, setLedMaskState] = useState(0);
   const [btnMask, setBtnMask]   = useState(0);
   const [classicStatus, setClassicStatus] = useState(null); // bit0=peer known, bit1=classic connected
+  const [fwVersion, setFwVersion] = useState(null); // version string from the device
   const [log, setLog]           = useState([]);
   const [knownDevices, setKnownDevices] = useState([]);
   const [available, setAvailable] = useState(null); // null = unknown/unsupported
@@ -63,6 +65,7 @@ export function useBLE({ onButtonChange } = {}) {
     setDeviceName(null);
     setBtnMask(0);
     setClassicStatus(null);
+    setFwVersion(null);
     charBtns.current = null;
     charLeds.current = null;
     charStatus.current = null;
@@ -101,6 +104,15 @@ export function useBLE({ onButtonChange } = {}) {
       setClassicStatus(initStatus.getUint8(0));
       charStatus.current.addEventListener('characteristicvaluechanged', onStatusNotify);
       await charStatus.current.startNotifications();
+
+      // Firmware version (0xFF14, read-only string)
+      try {
+        const verChar = await service.getCharacteristic(CVERSION);
+        const verData = await verChar.readValue();
+        setFwVersion(new TextDecoder().decode(verData));
+      } catch (_) {
+        setFwVersion(null); // older firmware without the version characteristic
+      }
     } catch (_) {
       setClassicStatus(null);
     }
@@ -211,7 +223,7 @@ export function useBLE({ onButtonChange } = {}) {
   }, []);
 
   return {
-    status, deviceName, ledMask, btnMask, log, knownDevices, available, classicStatus,
+    status, deviceName, ledMask, btnMask, log, knownDevices, available, classicStatus, fwVersion,
     connect, disconnect, reconnect, getDevice,
     setLed, setLedMask, allLedsOff, writeLeds,
     simulateButton, addLog,

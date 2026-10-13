@@ -166,6 +166,7 @@ export default function App() {
                   <DeviceSummary
                     deviceName={ble.deviceName}
                     classicStatus={ble.classicStatus}
+                    fwVersion={ble.fwVersion}
                     getDevice={ble.getDevice}
                   />
                 ) : (
@@ -251,7 +252,7 @@ export default function App() {
                   ledMask={ble.ledMask}
                 />
                 <SessionLog entries={sim.sessionLog} onClear={sim.clearSessionLog} />
-                <OtaPanel connected={connected} getDevice={ble.getDevice} />
+                <OtaPanel connected={connected} fwVersion={ble.fwVersion} getDevice={ble.getDevice} />
               </div>
             </section>
           )}
