@@ -49,6 +49,7 @@
 #include "btstack_run_loop.h"
 
 #include <hardware/dma.h>
+#include <hardware/pio.h>
 #include <stddef.h>
 #include <stdio.h>
 
@@ -83,22 +84,42 @@ static audio_buffer_pool_t *init_audio(uint32_t sample_frequency,
   audio_buffer_pool_t *producer_pool = audio_new_producer_pool(
       &btstack_audio_pico_producer_format, 3, SAMPLES_PER_BUFFER);
 
+  printf("[i2s] pool created, setting up\n");
+
+  // The CYW43 radio driver claims PIO state machines dynamically (the WL
+  // chip talks over PIO-SPI on pio0). A hardcoded SM index collides with
+  // it and reprograms a state machine the radio is actively using,
+  // crashing the MCU when an A2DP stream starts — claim a free one.
+  int sm = pio_claim_unused_sm(pio0, false);
+  if (sm < 0) {
+    printf("[i2s] no free PIO state machine on pio0\n");
+    return NULL;
+  }
+  printf("[i2s] claimed pio0 sm %d\n", sm);
+
   audio_i2s_config_t config;
   config.data_pin = PICO_AUDIO_I2S_DATA_PIN;
   config.clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE; // BCK, LRCK = BCK+1
   config.dma_channel = (int8_t)dma_claim_unused_channel(true);
-  config.pio_sm = 0;
+  config.pio_sm = (uint8_t)sm;
 
   // audio_i2s_setup claims the channel again
   // https://github.com/raspberrypi/pico-extras/issues/48
   dma_channel_unclaim(config.dma_channel);
+  printf("[i2s] dma channel %d, calling audio_i2s_setup\n", config.dma_channel);
   const audio_format_t *output_format =
       audio_i2s_setup(&btstack_audio_pico_audio_format, &config);
   if (!output_format) {
-    panic("PicoAudio: Unable to open audio device.\n");
+    printf("[i2s] setup FAILED\n");
+    return NULL;
   }
+  printf("[i2s] setup ok, connecting\n");
 
   bool ok = audio_i2s_connect(producer_pool);
+  printf("[i2s] connect %s\n", ok ? "ok" : "failed");
+  if (!ok) {
+    return NULL;
+  }
   assert(ok);
   (void)ok;
 
@@ -153,6 +174,9 @@ static int btstack_audio_pico_sink_init(
 
   playback_callback = playback;
   btstack_audio_pico_audio_buffer_pool = init_audio(samplerate, channels);
+  if (!btstack_audio_pico_audio_buffer_pool) {
+    return -1; // no free PIO SM or DMA channel — audio stays disabled
+  }
 
   return 0;
 }

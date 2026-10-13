@@ -332,11 +332,13 @@ static void event_handler(uint8_t event, uint8_t *packet) {
 
   case A2DP_SUBEVENT_STREAM_STARTED:
     _stream_state = STREAM_STATE_PLAYING;
+    printf("[a2dp] stream started, reconfigure=%d\n", _sbc_configuration.reconfigure);
     if (_sbc_configuration.reconfigure) {
       media_processing_close();
     }
     // Prepare media processing
     media_processing_init(&_sbc_configuration);
+    printf("[a2dp] media processing initialized\n");
     // Audio stream is started when buffer reaches minimal level
     break;
 
@@ -429,6 +431,11 @@ static int read_sbc_header(uint8_t *packet, int size, int *offset,
 
 static void media_handler(uint8_t seid, uint8_t *packet, uint16_t size) {
   UNUSED(seid);
+  static uint32_t _media_packets = 0;
+  if (_media_packets == 0) {
+    printf("[a2dp] first media packet, %u bytes\n", size);
+  }
+  _media_packets++;
 
   int pos = 0;
 
