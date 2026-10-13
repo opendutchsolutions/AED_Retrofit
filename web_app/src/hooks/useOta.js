@@ -147,16 +147,14 @@ export function useOta({ getDevice, setOtaActive }) {
       }
       blob.set(sig, bytes.length);
       let chunk = 240;
-      let withoutResponse = true;
       let lastReported = 0;
       let ackTimeoutWarned = false;
-      // TCP-like stop-and-wait flow control: the device notifies RECEIVING
-      // after each 4 kB sector it erases+programs (~100-150 ms with
-      // interrupts locked). Send one 4 kB block, then wait for its ACK
-      // before sending the next — no HCI pressure builds up during a
-      // flush, and the pace adapts to the actual flash speed.
-      // Pacing knobs, overridable via URL for transfer debugging:
-      // ?otaPause=250&otaBlock=4096
+      // Write-with-response only: each packet is acknowledged round-trip,
+      // so the JS pacing is the true radio pacing. writeValueWithoutResponse
+      // resolves when CoreBluetooth queues the packet — the radio keeps
+      // transmitting the queue backlog while the device is in its ~47 ms
+      // flash stall, overflowing the controller and killing the link with
+      // a supervision timeout a variable way into the transfer.
       const q = new URLSearchParams(location.search);
       const FLASH_BLOCK = Number(q.get('otaBlock')) > 0 ? Number(q.get('otaBlock')) : 4096;
       const ACK_TIMEOUT_MS = 2000;
@@ -172,20 +170,9 @@ export function useOta({ getDevice, setOtaActive }) {
       for (let off = 0, n = 0; off < blob.length; n++) {
         const part = blob.subarray(off, Math.min(off + chunk, blob.length));
         try {
-          if (withoutResponse) {
-            await data.writeValueWithoutResponse(part);
-          } else {
-            await data.writeValue(part);
-          }
+          await data.writeValue(part); // with response: radio-paced
         } catch (err) {
           const msg = String(err?.message ?? err);
-          // Some iOS Web Bluetooth implementations don't support
-          // writeValueWithoutResponse — fall back to writeValue.
-          if (withoutResponse && /support/i.test(msg)) {
-            withoutResponse = false;
-            addLog(`writeValueWithoutResponse niet ondersteund (${msg}) — overgeschakeld naar writeValue`);
-            continue; // retry the same offset
-          }
           // The negotiated ATT MTU varies per platform (iOS ~185, no API
           // to query it). Shrink the chunk until the write is accepted.
           if (chunk > 20) {
