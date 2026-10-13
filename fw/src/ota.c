@@ -163,8 +163,8 @@ static bool verify_signature(void) {
   }
   // Stream the staged image 4KB at a time (it lives in XIP flash)
   static uint8_t chunk[FLASH_SECTOR_SIZE_4K];
-  for (uint32_t off = 0; off < _received; off += sizeof(chunk)) {
-    uint32_t n = _received - off;
+  for (uint32_t off = 0; off < _image_size; off += sizeof(chunk)) {
+    uint32_t n = _image_size - off;
     if (n > sizeof(chunk)) {
       n = sizeof(chunk);
     }
@@ -177,7 +177,8 @@ static bool verify_signature(void) {
 }
 
 typedef struct {
-  uint32_t offset;
+  uint32_t offset;   // flash offset (XIP-relative) to write
+  uint32_t buf_off;  // byte offset in _sector_buf to source the data from
 } ota_flash_param_t;
 
 static ota_flash_param_t _flush_param;
@@ -188,11 +189,8 @@ static void ota_erase_sector(void *param) {
 }
 
 static void ota_program_page(void *param) {
-  // _sector_buf is static; program at _flush_param.offset + page offset
-  // (the param is the full struct, buffer accessed via the static)
   const ota_flash_param_t *p = param;
-  flash_range_program(p->offset, _sector_buf + (p->offset - OTA_STAGING_BASE - _received),
-                       FLASH_PAGE_SIZE_256);
+  flash_range_program(p->offset, _sector_buf + p->buf_off, FLASH_PAGE_SIZE_256);
 }
 
 // Erase + program one buffered sector of the staging area using
@@ -238,8 +236,9 @@ static void finish_transfer(void) {
     return;
   }
 
-  printf("[ota] verifying %u bytes\n", _received);
-  uint32_t crc = crc32((const uint8_t *)OTA_STAGING_BASE, _received);
+  printf("[ota] verifying %u bytes\n", _image_size);
+  // CRC covers the image only — not the 64 signature bytes riding the stream
+  uint32_t crc = crc32((const uint8_t *)OTA_STAGING_BASE, _image_size);
   if (crc != _image_crc) {
     printf("[ota] crc mismatch (got 0x%08x want 0x%08x)\n", crc, _image_crc);
     set_error(OTA_ERR_CRC);
@@ -254,7 +253,7 @@ static void finish_transfer(void) {
 
   ota_apply_record_t rec = {
     .magic = OTA_APPLY_MAGIC,
-    .size = _received,
+    .size = _image_size, // image only — the 64 signature bytes are not flashed
     .crc = crc,
   };
   int rc = kvs_set(KV_KEY_OTA_APPLY, &rec, sizeof(rec));

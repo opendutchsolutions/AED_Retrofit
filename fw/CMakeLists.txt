@@ -62,7 +62,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     #CONN_PIN=26
     BT_PIN="0000"
     BT_NAME="AED-Simulator-1"
-    FW_VERSION="1.0.1"
+    FW_VERSION="1.0.2"
 )
 
 target_link_libraries(${PROJECT_NAME}
