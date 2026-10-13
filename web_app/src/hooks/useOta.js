@@ -94,9 +94,14 @@ export function useOta({ getDevice }) {
       addLog('Start- (0xFF21) en data-kenmerk (0xFF22) gevonden');
 
       let finalState = null;
+      let ackCount = 0; // RECEIVING notifications: START ack + one per flushed sector
       const stateName = { 1: 'ontvangst bevestigd', 2: 'controle CRC + handtekening', 3: 'gereed', 4: 'fout' };
       const onNotify = (e) => {
         const s = e.target.value.getUint8(0);
+        if (s === OTA_STATE.RECEIVING) {
+          ackCount++;
+          return; // per-sector ACKs are logged by the block loop instead
+        }
         addLog(`Apparaatstatus: ${stateName[s] || s}`, s === OTA_STATE.ERROR ? 'err' : s === OTA_STATE.READY ? 'ok' : 'info');
         if (s === OTA_STATE.READY || s === OTA_STATE.ERROR) finalState = s;
       };
@@ -127,13 +132,22 @@ export function useOta({ getDevice }) {
       let chunk = 240;
       let withoutResponse = true;
       let lastReported = 0;
-      // The device stalls ~100-150 ms per 4 kB sector flush (flash erase
-      // with interrupts locked). Pausing at each 4 kB boundary gives it
-      // time to flush and drain HCI without incoming traffic pressure;
-      // without this the link drops a variable way into the transfer.
-      const FLASH_BLOCK = 4096;
-      const FLUSH_PAUSE_MS = 250;
+      let ackTimeoutWarned = false;
       let nextBoundary = FLASH_BLOCK;
+      // TCP-like stop-and-wait flow control: the device notifies RECEIVING
+      // after each 4 kB sector it erases+programs (~100-150 ms with
+      // interrupts locked). Send one 4 kB block, then wait for its ACK
+      // before sending the next — no HCI pressure builds up during a
+      // flush, and the pace adapts to the actual flash speed.
+      const FLASH_BLOCK = 4096;
+      const ACK_TIMEOUT_MS = 2000;
+      const waitForAck = async (expected) => {
+        const deadline = Date.now() + ACK_TIMEOUT_MS;
+        while (ackCount < expected && Date.now() < deadline) {
+          await sleep(20);
+        }
+        return ackCount >= expected;
+      };
       for (let off = 0, n = 0; off < blob.length; n++) {
         const part = blob.subarray(off, Math.min(off + chunk, blob.length));
         try {
@@ -160,13 +174,22 @@ export function useOta({ getDevice }) {
           }
           throw err;
         }
+        const prevOff = off;
         off += part.length;
         setProgress(off / blob.length);
-        if (off >= nextBoundary && off < blob.length) {
+        // Block boundary: wait for the device to confirm the sector flush
+        if (prevOff < nextBoundary && off >= nextBoundary && off < blob.length) {
           nextBoundary += FLASH_BLOCK;
-          await sleep(FLUSH_PAUSE_MS);
-          if (nextBoundary <= FLASH_BLOCK * 2) {
-            addLog(`Sectiepauze ${FLUSH_PAUSE_MS} ms per ${FLASH_BLOCK / 1024} kB — apparaat schrijft ondertussen naar flash`);
+          const block = Math.floor(off / FLASH_BLOCK); // completed blocks
+          const acked = await waitForAck(block + 1);    // +1 for the START ack
+          if (acked) {
+            if (block === 1) {
+              addLog(`Sectie-bevestigingen ontvangen — stop-and-wait pacing actief (${FLASH_BLOCK / 1024} kB per blok)`);
+            }
+          } else if (!ackTimeoutWarned) {
+            ackTimeoutWarned = true;
+            addLog(`Geen sectie-bevestiging na ${ACK_TIMEOUT_MS} ms — apparaat stuurt geen ACKs, verder met vaste pauze`, 'warn');
+            await sleep(250);
           }
         }
         if (off - lastReported >= blob.length / 10 || off === blob.length) {
