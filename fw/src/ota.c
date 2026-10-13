@@ -222,7 +222,7 @@ static void finish_transfer(void) {
       return;
     }
   }
-  if (_received < _image_size) {
+  if (_received < _image_size + 64) {
     set_error(OTA_ERR_INCOMPLETE);
     return;
   }
@@ -266,8 +266,36 @@ static void handle_data(const uint8_t *buffer, uint16_t size) {
     return; // ignore data outside a transfer
   }
   while (size > 0) {
+    // Route bytes past the image into the signature buffer
+    if (_received + _buf_fill >= _image_size) {
+      uint32_t sig_off = (_received + _buf_fill) - _image_size;
+      uint32_t sig_take = 64 - sig_off;
+      if (sig_take > size) {
+        sig_take = size;
+      }
+      if (sig_off + sig_take > 64) {
+        set_error(OTA_ERR_OVERFLOW);
+        return;
+      }
+      memcpy(_signature + sig_off, buffer, sig_take);
+      if (sig_off + sig_take == 64) {
+        _have_signature = true;
+        printf("[ota] signature complete\n");
+      }
+      buffer += sig_take;
+      size -= sig_take;
+      // Account for the signature bytes in _received via _buf_fill
+      // (they don't go to flash, but count toward the total)
+      _received += sig_take;
+      if (size == 0) break;
+    }
+
     uint32_t space = sizeof(_sector_buf) - _buf_fill;
     uint32_t take = (size < space) ? size : space;
+    if (take > _image_size - (_received + _buf_fill)) {
+      take = _image_size - (_received + _buf_fill);
+    }
+    if (take == 0) break;
     memcpy(_sector_buf + _buf_fill, buffer, take);
     _buf_fill += take;
     buffer += take;
@@ -291,24 +319,27 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     return;
   }
   switch (buffer[0]) {
-  case 0x01: { // START [size:u32][crc32:u32]
-    if (size < 9) {
+  case 0x01: { // START [total_size:u32][crc32:u32][sig_offset:u32]
+    // total_size = image bytes + 64-byte signature appended at the end
+    if (size < 13) {
       return;
     }
-    uint32_t img_size = little_endian_read_32(buffer, 1);
-    uint32_t img_crc = little_endian_read_32(buffer, 5);
-    if (img_size == 0 || img_size > OTA_STAGING_SIZE) {
+    uint32_t total_size = little_endian_read_32(buffer, 1);
+    uint32_t total_crc = little_endian_read_32(buffer, 5);
+    uint32_t img_size = little_endian_read_32(buffer, 9);
+    if (img_size == 0 || img_size > OTA_STAGING_SIZE ||
+        total_size != img_size + 64 || total_size > OTA_STAGING_SIZE + 64) {
       set_error(OTA_ERR_TOO_BIG);
       return;
     }
     _image_size = img_size;
-    _image_crc = img_crc;
+    _image_crc = total_crc; // CRC covers image bytes only (0..img_size)
     _received = 0;
     _buf_fill = 0;
     _have_signature = false;
     _error = OTA_ERR_NONE;
     _state = OTA_RECEIVING;
-    printf("[ota] start: %u bytes, crc 0x%08x\n", img_size, img_crc);
+    printf("[ota] start: %u image + 64 sig bytes, crc 0x%08x\n", img_size, total_crc);
     notify_status();
     break;
   }
@@ -323,13 +354,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _have_signature = false;
     notify_status();
     break;
-  case 0x04: // SIGNATURE [raw r||s : 64]
-    if (size < 1 + sizeof(_signature)) {
-      return;
-    }
-    memcpy(_signature, buffer + 1, sizeof(_signature));
-    _have_signature = true;
-    printf("[ota] signature received\n");
+  case 0x04: // SIGNATURE — deprecated, signature now rides the data stream
     break;
   default:
     break;

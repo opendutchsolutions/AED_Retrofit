@@ -82,18 +82,27 @@ export function useOta({ getDevice }) {
       ctrl.addEventListener('characteristicvaluechanged', onNotify);
       await ctrl.startNotifications();
 
-      // START [0x01][size][crc32]
-      const cmd = new Uint8Array(9);
+      // START [0x01][total_size:u32][crc32:u32][image_size:u32]
+      // total = image + 64-byte signature appended; crc covers image only
+      const cmd = new Uint8Array(13);
       const cmdDv = new DataView(cmd.buffer);
       cmd[0] = 0x01;
-      cmdDv.setUint32(1, bytes.length, true);
-      cmdDv.setUint32(5, crc32(bytes), true);
+      cmdDv.setUint32(1, bytes.length + 64, true);   // total
+      cmdDv.setUint32(5, crc32(bytes), true);         // crc of image bytes
+      cmdDv.setUint32(9, bytes.length, true);         // image size
       await ctrl.writeValue(cmd);
 
       setStatus(`${label} (${Math.ceil(bytes.length / 1024)} kB)…`);
+      // Stream image + signature as one continuous blob
+      const blob = new Uint8Array(bytes.length + 64);
+      blob.set(bytes, 0);
+      if (!sig || sig.length !== 64) {
+        throw new Error('geen geldige handtekening (64 bytes vereist)');
+      }
+      blob.set(sig, bytes.length);
       let chunk = 240;
-      for (let off = 0, n = 0; off < bytes.length; n++) {
-        const part = bytes.subarray(off, Math.min(off + chunk, bytes.length));
+      for (let off = 0, n = 0; off < blob.length; n++) {
+        const part = blob.subarray(off, Math.min(off + chunk, blob.length));
         try {
           await data.writeValueWithoutResponse(part);
         } catch (err) {
@@ -104,19 +113,9 @@ export function useOta({ getDevice }) {
           throw err;
         }
         off += part.length;
-        setProgress(off / bytes.length);
+        setProgress(off / blob.length);
         if (n % 16 === 0) await sleep(15);
       }
-
-      // SIGNATURE [0x04][raw r||s : 64] — the device verifies it against
-      // its compiled-in public key before applying the update
-      if (!sig || sig.length !== 64) {
-        throw new Error('geen geldige handtekening (64 bytes vereist)');
-      }
-      const signCmd = new Uint8Array(65);
-      signCmd[0] = 0x04;
-      signCmd.set(sig, 1);
-      await ctrl.writeValue(signCmd);
 
       // FINISH [0x02] — device verifies CRC + signature, then reboots
       setStatus('Controleren…');
