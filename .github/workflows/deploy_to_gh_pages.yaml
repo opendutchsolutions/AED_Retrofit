@@ -4,28 +4,47 @@ on:
   push:
     branches:
       - main
-  # Commits pushed by the firmware workflow use GITHUB_TOKEN, which does
-  # not trigger push-based workflows — chain on its completion instead
-  workflow_run:
-    workflows: ["Build, sign & publish firmware"]
-    types: [completed]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   deploy:
-    # On the workflow_run trigger, only deploy when the firmware build succeeded
-    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web_app
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # --- Firmware: build, hash & sign (TBYB), publish the UF2 for the web app
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib ninja-build
+
+      - name: Checkout pico-sdk and pico-extras
+        run: |
+          git clone --depth 1 --branch 2.2.0 --recursive --shallow-submodules https://github.com/raspberrypi/pico-sdk.git "$HOME/pico-sdk"
+          git clone --depth 1 --recursive --shallow-submodules https://github.com/raspberrypi/pico-extras.git "$HOME/pico-extras"
+
+      - name: Restore signing key
+        env:
+          FW_SIGNING_KEY: ${{ secrets.FW_SIGNING_KEY }}
+        run: printf '%s\n' "$FW_SIGNING_KEY" > fw/signing_key.pem
+
+      - name: Build, hash & sign firmware
+        run: |
+          cmake -S fw -B fw/build \
+            -DPICO_SDK_PATH="$HOME/pico-sdk" \
+            -DPICO_EXTRAS_PATH="$HOME/pico-extras" \
+            -DPICO_BOARD=pico2_w \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build fw/build
+          mkdir -p web_app/public/firmware
+          cp fw/build/picow-a2dp.uf2 web_app/public/firmware/picow-a2dp.uf2
+
+      # --- Site: build and deploy (includes the signed firmware file)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -35,9 +54,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        working-directory: web_app
 
-      - name: Build
+      - name: Build site
         run: npm run build
+        working-directory: web_app
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
