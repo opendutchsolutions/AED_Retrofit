@@ -30,6 +30,7 @@
 #include "hardware/watchdog.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
+#include "kvstore.h"
 
 void fatal(void) {
   watchdog_enable(1000, true); // Reboot in 1s
@@ -89,6 +90,11 @@ int main(void) {
   }
   cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, false,
                     CYW43_COUNTRY_WORLDWIDE);
+  // Persistent key-value store — holds the classic audio peer address
+  // used to re-establish the A2DP link when BLE (re)connects
+  if (!kvs_init()) {
+    printf("kvs_init failed\n");
+  }
   bt_begin(BT_NAME, BT_PIN, on_bt_up, NULL);
   led_pins_init();
 

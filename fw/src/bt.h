@@ -31,6 +31,9 @@
  * - Added SDP, SM (Security Manager) and GATT service initialization
  * - Added debug logging for Classic BT connection request and complete events
  * - Added startup logging of local BD address
+ * - Added automatic classic audio reconnect on BLE connect, with the peer
+ *   address persisted in the pico-kvstore (bt_reconnect_classic /
+ *   bt_classic_connected)
  */
 
 #ifndef bt_h
@@ -71,5 +74,18 @@ bool bt_up();
  * @param local_addr The local addr to change to
  */
 void bt_addr(bd_addr_t local_addr);
+
+/**
+ * @brief Re-establish the Classic (A2DP) audio connection to the last
+ *        connected peer. No-op when the stack is down, no peer is known,
+ *        an attempt is already pending, or the Classic link is already up.
+ */
+void bt_reconnect_classic(void);
+
+/**
+ * @brief Checks whether a Classic (BR/EDR) connection is currently active
+ * @return Returns true when a Classic connection is up
+ */
+bool bt_classic_connected(void);
 
 #endif
