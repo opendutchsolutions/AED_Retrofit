@@ -13,3 +13,8 @@ PRIMARY_SERVICE,
     //              bit4=LOW_BELLY, bit5=BREAST
     CHARACTERISTIC,
     0xFF12, READ | WRITE, 0
+
+    // --- Classic audio status (read + notify) ---
+    // bit0=classic peer address stored, bit1=classic link connected
+    CHARACTERISTIC,
+    0xFF13, READ | NOTIFY, 0

@@ -29,6 +29,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/** Classic (BR/EDR) audio status bits — characteristic 0xFF13 */
+#define CLASSIC_STATUS_PEER_KNOWN 0x01u
+#define CLASSIC_STATUS_CONNECTED 0x02u
+
 /**
  * @brief Initialize the BLE GATT protocol layer
  */
@@ -51,5 +55,13 @@ void gatt_service_start_timer(void);
  *         Bit6=Buzzer
  */
 uint8_t gatt_service_get_leds(void);
+
+/**
+ * @brief Update the Classic (BR/EDR) audio status characteristic (0xFF13)
+ *        and notify the connected BLE client when it changed
+ * @param status Bit 0: classic peer address stored (paired before),
+ *               bit 1: classic link currently connected
+ */
+void gatt_service_set_classic_status(uint8_t status);
 
 #endif /* GATT_SERVICE_H */
