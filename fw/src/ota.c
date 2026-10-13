@@ -453,7 +453,8 @@ void ota_init(void) {
 
   _handle_data_value = att_db_util_add_characteristic_uuid16(
       OTA_DATA_UUID,
-      ATT_PROPERTY_WRITE_WITHOUT_RESPONSE | ATT_PROPERTY_DYNAMIC,
+      ATT_PROPERTY_WRITE | ATT_PROPERTY_WRITE_WITHOUT_RESPONSE |
+          ATT_PROPERTY_DYNAMIC,
       ATT_SECURITY_NONE, ATT_SECURITY_NONE, NULL, 0);
 
   _service.start_handle = _handle_service_start;

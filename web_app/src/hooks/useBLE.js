@@ -5,6 +5,8 @@ const CBTNS   = '0000ff11-0000-1000-8000-00805f9b34fb';
 const CLEDS   = '0000ff12-0000-1000-8000-00805f9b34fb';
 const CSTATUS = '0000ff13-0000-1000-8000-00805f9b34fb';
 const CVERSION = '0000ff14-0000-1000-8000-00805f9b34fb';
+// OTA update service (see useOta.js)
+const OTA_SVC = '0000ff20-0000-1000-8000-00805f9b34fb';
 
 export const LED_BITS = { shock:0, on_off:1, info:2, hands_off:3, low_belly:4, breast:5, buzzer:6 };
 export const BTN_BITS = { shock:0, on_off:1, info:2, card_slot:3, pads_inserted:4 };
@@ -125,7 +127,10 @@ export function useBLE({ onButtonChange } = {}) {
     try {
       const dev = await navigator.bluetooth.requestDevice({
         filters: [{ services: [SVC] }],
-        optionalServices: [SVC],
+        // All services accessed later must be declared here; iOS Web
+        // Bluetooth implementations enforce this strictly (Chrome does
+        // not). Without it getPrimaryService('0xFF20') fails during OTA.
+        optionalServices: [SVC, OTA_SVC],
       });
       deviceRef.current = dev;
       dev.addEventListener('gattserverdisconnected', onDisconnect);

@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { Card, Btn } from './UI';
+import { LogField } from './LogField';
 import { parseUf2, useOta } from '../hooks/useOta';
 import { FIRMWARE_URL, SIGNATURE_URL, isNewer, fetchServerVersion, fetchFirmwareArtifact } from '../firmware';
 
 export function OtaPanel({ connected, fwVersion, getDevice }) {
-  const { busy, status, progress, run, setStatus } = useOta({ getDevice });
+  const { busy, status, progress, run, setStatus, log, addLog } = useOta({ getDevice });
   const [fetching, setFetching] = useState(false);
   const [serverVersion, setServerVersion] = useState(null);
 
   React.useEffect(() => {
-    fetchServerVersion().then(setServerVersion);
-  }, []);
+    fetchServerVersion().then(v => {
+      setServerVersion(v);
+      if (v) addLog(`Nieuwste firmware op de server: v${v}`);
+    });
+  }, [addLog]);
 
   const updateAvailable = isNewer(serverVersion, fwVersion);
   const versionKnown = Boolean(serverVersion && fwVersion);
@@ -18,16 +22,21 @@ export function OtaPanel({ connected, fwVersion, getDevice }) {
   async function startOta() {
     setFetching(true);
     setStatus('Nieuwste firmware ophalen…');
+    addLog(`Firmware ophalen: ${FIRMWARE_URL}`);
     try {
       const [fwResp, sigResp] = await Promise.all([
         fetchFirmwareArtifact(FIRMWARE_URL), fetchFirmwareArtifact(SIGNATURE_URL),
       ]);
       if (!fwResp.ok) throw new Error(`firmware niet gevonden (HTTP ${fwResp.status})`);
       if (!sigResp.ok) throw new Error(`handtekening niet gevonden (HTTP ${sigResp.status})`);
-      const bytes = parseUf2(await fwResp.arrayBuffer());
+      const fwBuf = await fwResp.arrayBuffer();
+      addLog(`Firmware gedownload: ${Math.round(fwBuf.byteLength / 1024)} kB`);
+      const bytes = parseUf2(fwBuf);
       const sig = new Uint8Array(await sigResp.arrayBuffer());
+      addLog(`UF2 uitgepakt: ${bytes.length} bytes image, ${sig.length} bytes handtekening`);
       await run(bytes, sig);
     } catch (e) {
+      addLog(`Update mislukt: ${e?.message || e}`, 'err');
       setStatus(`Update mislukt: ${e?.message || e}`);
     } finally {
       setFetching(false);
@@ -82,6 +91,7 @@ export function OtaPanel({ connected, fwVersion, getDevice }) {
       {status && (
         <p className="message" role="status" style={{ marginBottom: 0 }}>{status}</p>
       )}
+      <LogField entries={log} label="Update-logboek" />
     </Card>
   );
 }

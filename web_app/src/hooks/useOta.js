@@ -61,36 +61,53 @@ export function useOta({ getDevice }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [progress, setProgress] = useState(null);
+  const [log, setLog] = useState([]);
+
+  const addLog = useCallback((msg, type = 'info') => {
+    const time = new Date().toLocaleTimeString('nl-NL', { hour12: false });
+    setLog(l => [...l, { time, msg, type }]);
+  }, []);
 
   const run = useCallback(async (bytes, sig, { label = 'Overbrengen' } = {}) => {
     setBusy(true);
     setProgress(0);
     setStatus('Verbinden met de update-service…');
+    const started = Date.now();
+    const elapsed = () => `${((Date.now() - started) / 1000).toFixed(1)}s`;
+    addLog(`Update gestart (${label.toLowerCase()}, ${bytes.length} bytes)`);
     try {
       const dev = getDevice();
       if (!dev?.gatt?.connected) throw new Error('niet verbonden met de oefen-AED');
+      addLog(`Apparaat: ${dev.name || 'onbekend'}, GATT verbonden`);
 
+      addLog('OTA-service opzoeken (0xFF20)…');
       const svc  = await dev.gatt.getPrimaryService(SVC_UUID);
       const ctrl = await svc.getCharacteristic(CTRL_UUID);
       const data = await svc.getCharacteristic(DATA_UUID);
+      addLog('Start- (0xFF21) en data-kenmerk (0xFF22) gevonden');
 
       let finalState = null;
+      const stateName = { 1: 'ontvangst bevestigd', 2: 'controle CRC + handtekening', 3: 'gereed', 4: 'fout' };
       const onNotify = (e) => {
         const s = e.target.value.getUint8(0);
+        addLog(`Apparaatstatus: ${stateName[s] || s}`, s === OTA_STATE.ERROR ? 'err' : s === OTA_STATE.READY ? 'ok' : 'info');
         if (s === OTA_STATE.READY || s === OTA_STATE.ERROR) finalState = s;
       };
       ctrl.addEventListener('characteristicvaluechanged', onNotify);
       await ctrl.startNotifications();
+      addLog('Meldingen geactiveerd op 0xFF21');
 
       // START [0x01][total_size:u32][crc32:u32][image_size:u32]
       // total = image + 64-byte signature appended; crc covers image only
       const cmd = new Uint8Array(13);
       const cmdDv = new DataView(cmd.buffer);
+      const imageCrc = crc32(bytes);
       cmd[0] = 0x01;
       cmdDv.setUint32(1, bytes.length + 64, true);   // total
-      cmdDv.setUint32(5, crc32(bytes), true);         // crc of image bytes
-      cmdDv.setUint32(9, bytes.length, true);         // image size
+      cmdDv.setUint32(5, imageCrc, true);            // crc of image bytes
+      cmdDv.setUint32(9, bytes.length, true);        // image size
       await ctrl.writeValue(cmd);
+      addLog(`START verstuurd: ${bytes.length} + 64 bytes, crc 0x${imageCrc.toString(16).padStart(8, '0')} [${elapsed()}]`);
 
       setStatus(`${label} (${Math.ceil(bytes.length / 1024)} kB)…`);
       // Stream image + signature as one continuous blob
@@ -102,6 +119,7 @@ export function useOta({ getDevice }) {
       blob.set(sig, bytes.length);
       let chunk = 240;
       let withoutResponse = true;
+      let lastReported = 0;
       for (let off = 0, n = 0; off < blob.length; n++) {
         const part = blob.subarray(off, Math.min(off + chunk, blob.length));
         try {
@@ -116,24 +134,32 @@ export function useOta({ getDevice }) {
           // writeValueWithoutResponse — fall back to writeValue.
           if (withoutResponse && /support/i.test(msg)) {
             withoutResponse = false;
+            addLog(`writeValueWithoutResponse niet ondersteund (${msg}) — overgeschakeld naar writeValue`);
             continue; // retry the same offset
           }
           // The negotiated ATT MTU varies per platform (iOS ~185, no API
           // to query it). Shrink the chunk until the write is accepted.
           if (chunk > 20) {
             chunk = chunk > 128 ? 128 : (chunk > 64 ? 64 : 20);
+            addLog(`Schrijffout op ${off} bytes (${msg}) — chunk verkleind naar ${chunk} bytes`, 'warn');
             continue; // write failed → retry the same offset
           }
           throw err;
         }
         off += part.length;
         setProgress(off / blob.length);
+        if (off - lastReported >= blob.length / 10 || off === blob.length) {
+          lastReported = off;
+          addLog(`Overgebracht: ${Math.round(off / 1024)} / ${Math.round(blob.length / 1024)} kB (${Math.round(off / blob.length * 100)}%) [${elapsed()}]`);
+        }
         if (n % 16 === 0) await sleep(15);
       }
+      addLog(`Alle ${blob.length} bytes overgebracht [${elapsed()}]`);
 
       // FINISH [0x02] — device verifies CRC + signature, then reboots
       setStatus('Controleren…');
       await ctrl.writeValue(new Uint8Array([0x02]));
+      addLog('FINISH verstuurd — apparaat controleert CRC + handtekening');
 
       const deadline = Date.now() + 30000;
       while (finalState === null && Date.now() < deadline) await sleep(200);
@@ -142,15 +168,18 @@ export function useOta({ getDevice }) {
       if (finalState === OTA_STATE.ERROR) throw new Error('controle mislukt (CRC)');
       if (finalState === null) throw new Error('geen antwoord van het apparaat');
       setProgress(1);
+      addLog('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.', 'ok');
       setStatus('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.');
       return true;
     } catch (e) {
-      setStatus(`Update mislukt: ${e?.message || e}`);
+      const msg = e?.message || e;
+      addLog(`Update mislukt: ${msg} [${((Date.now() - started) / 1000).toFixed(1)}s]`, 'err');
+      setStatus(`Update mislukt: ${msg}`);
       return false;
     } finally {
       setBusy(false);
     }
-  }, [getDevice]);
+  }, [getDevice, addLog]);
 
-  return { busy, status, progress, run, setStatus };
+  return { busy, status, progress, run, setStatus, log, addLog };
 }
