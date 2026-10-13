@@ -22,7 +22,7 @@ export function StatusChip({ status, deviceName }) {
   );
 }
 
-export function ConnectCard({ status, deviceName, onConnect, onDisconnect, knownDevices, onReconnect, available }) {
+export function ConnectCard({ status, deviceName, onConnect, onDisconnect, knownDevices, onReconnect, available, error }) {
   const connected = status === 'connected';
   const unavailable = available === false;
   const reconnectable = !connected && !unavailable && (knownDevices?.length ?? 0) > 0;
@@ -57,7 +57,7 @@ export function ConnectCard({ status, deviceName, onConnect, onDisconnect, known
       )}
 
       <div
-        className={`message ${connected ? 'success' : unavailable ? 'error' : ''}`}
+        className={`message ${connected ? 'success' : unavailable || error ? 'error' : ''}`}
         role="status"
       >
         {connected
@@ -66,7 +66,9 @@ export function ConnectCard({ status, deviceName, onConnect, onDisconnect, known
             ? 'Zoeken naar de oefen-AED…'
             : unavailable
               ? 'Bluetooth is niet beschikbaar op dit apparaat. Zet Bluetooth aan of gebruik de simulatiestand.'
-              : 'Nog niet verbonden.'}
+              : error
+                ? `Verbinden mislukt: ${error}`
+                : 'Nog niet verbonden.'}
       </div>
     </Card>
   );
