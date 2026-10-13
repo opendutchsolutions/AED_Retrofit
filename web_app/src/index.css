@@ -538,6 +538,8 @@ footer {
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+  /* Functional indicator: pad positions must keep blinking */
+  .led-marker.blink.on { animation: led-blink 1.1s infinite !important; }
 }
 @media (forced-colors: active) {
   .status-dot, .led-light, .toggle-indicator { forced-color-adjust: none; border: 2px solid CanvasText; }
