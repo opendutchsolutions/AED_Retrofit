@@ -28,6 +28,7 @@
 #include "gatt_service.h"
 #include "hardware/clocks.h"
 #include "hardware/watchdog.h"
+#include "ota.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
 #include "kvstore.h"
@@ -95,6 +96,8 @@ int main(void) {
   if (!kvs_init()) {
     printf("kvs_init failed\n");
   }
+  // Commit an OTA update if this boot was the flash-update boot
+  ota_check_flash_update_boot();
   bt_begin(BT_NAME, BT_PIN, on_bt_up, NULL);
   led_pins_init();
 

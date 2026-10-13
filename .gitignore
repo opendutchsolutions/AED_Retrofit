@@ -56,3 +56,5 @@ dkms.conf
 
 *build/
 .vscode/
+# Firmware OTA signing key (injected from the FW_SIGNING_KEY secret in CI)
+fw/signing_key.pem
