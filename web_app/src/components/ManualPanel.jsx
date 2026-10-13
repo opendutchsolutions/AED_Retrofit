@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
-import { Card, SectionLabel, Btn, Divider } from './UI';
+import { Card, Btn, Divider } from './UI';
 import { AUDIO_FILES, LANGUAGES } from '../scenario/default';
 
 const LED_KEYS = [
-  { key: 'shock',     bit: 0, label: 'Shock' },
-  { key: 'on_off',    bit: 1, label: 'On/Off' },
+  { key: 'shock',     bit: 0, label: 'Schok' },
+  { key: 'on_off',    bit: 1, label: 'Aan/uit' },
   { key: 'info',      bit: 2, label: 'Info' },
-  { key: 'hands_off', bit: 3, label: 'Hands off' },
-  { key: 'low_belly', bit: 4, label: 'Low belly' },
-  { key: 'breast',    bit: 5, label: 'Breast' },
-  { key: 'buzzer',    bit: 6, label: 'Buzzer' },
+  { key: 'hands_off', bit: 3, label: 'Handen af' },
+  { key: 'low_belly', bit: 4, label: 'Onderbuik' },
+  { key: 'breast',    bit: 5, label: 'Borst' },
+  { key: 'buzzer',    bit: 6, label: 'Zoemer' },
 ];
 
 export function ManualPanel({ ledMask, onToggleLed, onAllOff, onPlayAudio, disabled }) {
@@ -19,52 +19,49 @@ export function ManualPanel({ ledMask, onToggleLed, onAllOff, onPlayAudio, disab
 
   return (
     <Card>
-      <SectionLabel>Manual control</SectionLabel>
+      <h2>Handmatige bediening</h2>
+      <p className="hint">Schakel afzonderlijke LED-lampjes aan of uit en speel audio af.</p>
 
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 6 }}>LED overrides</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {LED_KEYS.map(({ key, bit, label }) => {
-            const on = !!(ledMask & (1 << bit));
-            return (
-              <button
-                key={key}
-                onClick={() => onToggleLed(bit)}
-                disabled={disabled}
-                style={{
-                  padding: '4px 10px', borderRadius: 'var(--radius)', fontSize: 12,
-                  border: `1px solid ${on ? 'var(--green-border)' : 'var(--border2)'}`,
-                  background: on ? 'var(--green-bg)' : 'var(--bg3)',
-                  color: on ? 'var(--green)' : 'var(--text2)',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  opacity: disabled ? 0.4 : 1,
-                  fontFamily: 'var(--font)',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-          <Btn small variant="ghost" onClick={onAllOff} disabled={disabled}>All off</Btn>
-        </div>
+      <div className="chip-grid" style={{ marginTop: '.8rem' }}>
+        {LED_KEYS.map(({ key, bit, label }) => {
+          const on = !!(ledMask & (1 << bit));
+          return (
+            <button
+              key={key}
+              className="chip-button"
+              onClick={() => onToggleLed(bit)}
+              disabled={disabled}
+              aria-pressed={on}
+            >
+              {label}
+            </button>
+          );
+        })}
+        <Btn small variant="secondary" onClick={onAllOff} disabled={disabled}>Alle lampjes uit</Btn>
       </div>
 
       <Divider />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, color: 'var(--text3)', flex: 1 }}>Play audio</div>
-        <select value={lang} onChange={e => setLang(e.target.value)} style={{ fontSize: 12, padding: '3px 8px' }}>
+      <div className="field" style={{ maxWidth: '20rem' }}>
+        <label htmlFor="audio-language">Taal van de audio</label>
+        <select id="audio-language" value={lang} onChange={e => setLang(e.target.value)}>
           {LANGUAGES.map(l => <option key={l}>{l}</option>)}
         </select>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      <h3>Audio afspelen</h3>
+      <div className="chip-grid" style={{ marginTop: '.5rem' }}>
         {Object.entries(audioMap).map(([key, src]) => (
-          <Btn key={key} small variant="ghost" onClick={() => onPlayAudio(src)} disabled={disabled}>
+          <button
+            key={key}
+            className="chip-button"
+            onClick={() => onPlayAudio(src)}
+            disabled={disabled}
+          >
             {key.replace(/_/g, ' ')}
-          </Btn>
+          </button>
         ))}
       </div>
+      {disabled && <p className="hint">Verbind eerst met de oefen-AED om audio af te spelen.</p>}
     </Card>
   );
 }

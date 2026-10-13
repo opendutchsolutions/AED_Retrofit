@@ -2,7 +2,7 @@
 // Copyright (c) 2024 Victor Hogeweij
 import React, { useState, useRef } from 'react';
 import JSZip from 'jszip';
-import { Card, SectionLabel, Btn, Divider } from './UI';
+import { Card, Btn } from './UI';
 import { AUDIO_FILES, LANGUAGES } from '../scenario/default';
 
 const STEP_TYPES = ['button', 'timed', 'branch', 'end'];
@@ -12,9 +12,9 @@ const BUILTIN_AUDIO_KEYS = Object.keys(AUDIO_FILES['Nederlands']);
 
 function FieldRow({ label, children }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
-      <div style={{ fontSize: 12, color: 'var(--text3)', width: 110, flexShrink: 0, paddingTop: 6 }}>{label}</div>
-      <div style={{ flex: 1 }}>{children}</div>
+    <div className="field-row">
+      <div className="field-label">{label}</div>
+      <div>{children}</div>
     </div>
   );
 }
@@ -38,27 +38,24 @@ function StepEditor({ step, onChange, onDelete, allStepIds, customAudioKeys, onA
   }
 
   return (
-    <div style={{
-      background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-      padding: '10px 12px', marginBottom: 8,
-    }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+    <div className="step-editor">
+      <div className="inline" style={{ marginBottom: '.6rem' }}>
         <input value={step.id} onChange={e => set('id', e.target.value)}
-          placeholder="step-id" style={{ flex: 1, fontSize: 12, fontFamily: 'var(--mono)' }} />
-        <select value={step.type} onChange={e => set('type', e.target.value)} style={{ fontSize: 12 }}>
+          placeholder="stap-id" style={{ flex: 1 }} aria-label="Stap-id" />
+        <select value={step.type} onChange={e => set('type', e.target.value)} aria-label="Type stap">
           {STEP_TYPES.map(t => <option key={t}>{t}</option>)}
         </select>
-        <Btn small variant="danger" onClick={onDelete}>✕</Btn>
+        <Btn small variant="danger" onClick={onDelete} title="Stap verwijderen">✕</Btn>
       </div>
 
       <FieldRow label="Label">
         <input value={step.label || ''} onChange={e => set('label', e.target.value)}
-          style={{ width: '100%' }} placeholder="Step label" />
+          placeholder="Label van de stap" aria-label="Label" />
       </FieldRow>
 
-      <FieldRow label="Instruction">
+      <FieldRow label="Instructie">
         <textarea value={step.instruction || ''} onChange={e => set('instruction', e.target.value)}
-          rows={2} style={{ width: '100%', resize: 'vertical', fontSize: 12 }} />
+          rows={2} aria-label="Instructie" />
       </FieldRow>
 
       <FieldRow label="Audio">
@@ -73,23 +70,23 @@ function StepEditor({ step, onChange, onDelete, allStepIds, customAudioKeys, onA
                 set('audioKey', e.target.value || null);
               }
             }}
-            style={{ width: '100%', fontSize: 12 }}
+            aria-label="Audio van de stap"
           >
-            <option value="">— none —</option>
-            <optgroup label="Built-in">
+            <option value="">— geen —</option>
+            <optgroup label="Ingebouwd">
               {BUILTIN_AUDIO_KEYS.map(k => <option key={k} value={k}>{k}</option>)}
             </optgroup>
             {customAudioKeys.length > 0 && (
-              <optgroup label="Custom">
+              <optgroup label="Eigen audio">
                 {customAudioKeys.map(k => <option key={k} value={k}>{k}</option>)}
               </optgroup>
             )}
-            <option value="__upload__">+ Add own audio file…</option>
+            <option value="__upload__">+ Eigen audiobestand toevoegen…</option>
           </select>
           {awaitingUpload && (
             <>
-              <Btn small variant="ghost" onClick={() => fileInputRef.current?.click()}>
-                Choose file…
+              <Btn small variant="secondary" onClick={() => fileInputRef.current?.click()}>
+                Bestand kiezen…
               </Btn>
               <input ref={fileInputRef} type="file" accept="audio/*" style={{ display: 'none' }}
                 onChange={e => {
@@ -106,55 +103,55 @@ function StepEditor({ step, onChange, onDelete, allStepIds, customAudioKeys, onA
         </div>
       </FieldRow>
 
-      <FieldRow label="LEDs / Buzzer">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-          {LED_KEYS.map(k => (
-            <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 12, cursor: 'pointer' }}>
-              <input type="checkbox" checked={!!(step.leds?.[k])}
-                onChange={e => setLed(k, e.target.checked)} />
-              {k}
-            </label>
-          ))}
+      <FieldRow label="LED's / zoemer">
+        <div className="chip-grid" style={{ marginBottom: 0 }}>
+          {LED_KEYS.map(k => {
+            const on = !!(step.leds?.[k]);
+            return (
+              <label key={k} className="radio" style={{ fontWeight: 'normal', display: 'inline-flex', alignItems: 'center', gap: '.4rem', margin: '.25rem .5rem .25rem 0' }}>
+                <input type="checkbox" checked={on} style={{ width: '1.15rem', minHeight: 'auto', height: '1.15rem' }}
+                  onChange={e => setLed(k, e.target.checked)} />
+                {k}
+              </label>
+            );
+          })}
         </div>
       </FieldRow>
 
       {step.leds?.buzzer && (
-        <FieldRow label="Buzzer (ms)">
+        <FieldRow label="Zoemer (ms)">
           <input
             type="number" min={0} step={100}
             value={step.buzzer_duration_ms || ''}
             onChange={e => set('buzzer_duration_ms', Number(e.target.value) || null)}
-            placeholder="0 = stays on for step"
-            style={{ width: 160 }}
+            placeholder="0 = blijft aan tijdens de stap"
+            style={{ maxWidth: 200 }}
           />
         </FieldRow>
       )}
 
       {step.type === 'button' && (
         <>
-          <FieldRow label="Expect button">
-            <select value={step.expect_button || ''} onChange={e => set('expect_button', e.target.value)}
-              style={{ fontSize: 12 }}>
-              <option value="">— none —</option>
+          <FieldRow label="Verwachte knop">
+            <select value={step.expect_button || ''} onChange={e => set('expect_button', e.target.value)}>
+              <option value="">— geen —</option>
               {BTN_KEYS.map(k => <option key={k} value={k}>{k}</option>)}
             </select>
           </FieldRow>
-          <FieldRow label="Timeout (s)">
+          <FieldRow label="Time-out (s)">
             <input type="number" value={step.timeout_seconds || ''} min={0}
               onChange={e => set('timeout_seconds', Number(e.target.value))}
-              style={{ width: 80 }} />
+              style={{ maxWidth: 100 }} />
           </FieldRow>
-          <FieldRow label="On correct">
-            <select value={step.on_correct || ''} onChange={e => set('on_correct', e.target.value)}
-              style={{ fontSize: 12, width: '100%' }}>
-              <option value="">— none —</option>
+          <FieldRow label="Bij correct">
+            <select value={step.on_correct || ''} onChange={e => set('on_correct', e.target.value)}>
+              <option value="">— geen —</option>
               {allStepIds.map(id => <option key={id} value={id}>{id}</option>)}
             </select>
           </FieldRow>
-          <FieldRow label="On timeout">
-            <select value={step.on_timeout || ''} onChange={e => set('on_timeout', e.target.value)}
-              style={{ fontSize: 12, width: '100%' }}>
-              <option value="">— none —</option>
+          <FieldRow label="Bij time-out">
+            <select value={step.on_timeout || ''} onChange={e => set('on_timeout', e.target.value)}>
+              <option value="">— geen —</option>
               {allStepIds.map(id => <option key={id} value={id}>{id}</option>)}
             </select>
           </FieldRow>
@@ -163,15 +160,14 @@ function StepEditor({ step, onChange, onDelete, allStepIds, customAudioKeys, onA
 
       {step.type === 'timed' && (
         <>
-          <FieldRow label="Duration (s)">
+          <FieldRow label="Duur (s)">
             <input type="number" value={step.duration_seconds || ''} min={1}
               onChange={e => set('duration_seconds', Number(e.target.value))}
-              style={{ width: 80 }} />
+              style={{ maxWidth: 100 }} />
           </FieldRow>
-          <FieldRow label="On complete">
-            <select value={step.on_complete || ''} onChange={e => set('on_complete', e.target.value)}
-              style={{ fontSize: 12, width: '100%' }}>
-              <option value="">— none —</option>
+          <FieldRow label="Na afloop">
+            <select value={step.on_complete || ''} onChange={e => set('on_complete', e.target.value)}>
+              <option value="">— geen —</option>
               {allStepIds.map(id => <option key={id} value={id}>{id}</option>)}
             </select>
           </FieldRow>
@@ -179,21 +175,21 @@ function StepEditor({ step, onChange, onDelete, allStepIds, customAudioKeys, onA
       )}
 
       {step.type === 'branch' && (
-        <FieldRow label="Choices">
+        <FieldRow label="Keuzes">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {(step.choices || []).map((c, i) => (
-              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div key={i} className="inline">
                 <input value={c.label} onChange={e => setChoice(i, 'label', e.target.value)}
-                  placeholder="Choice label" style={{ flex: 1, fontSize: 12 }} />
+                  placeholder="Label van de keuze" style={{ flex: 1 }} aria-label={`Label keuze ${i + 1}`} />
                 <select value={c.next || ''} onChange={e => setChoice(i, 'next', e.target.value)}
-                  style={{ fontSize: 12 }}>
-                  <option value="">— next —</option>
+                  aria-label={`Volgende stap keuze ${i + 1}`}>
+                  <option value="">— volgende —</option>
                   {allStepIds.map(id => <option key={id} value={id}>{id}</option>)}
                 </select>
                 <Btn small variant="ghost" onClick={() => removeChoice(i)}>✕</Btn>
               </div>
             ))}
-            <Btn small variant="ghost" onClick={addChoice}>+ Add choice</Btn>
+            <Btn small variant="secondary" onClick={addChoice}>+ Keuze toevoegen</Btn>
           </div>
         </FieldRow>
       )}
@@ -207,23 +203,16 @@ function AudioBankSection({ bank, onRemove }) {
 
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 600, letterSpacing: '0.06em',
-        textTransform: 'uppercase', marginBottom: 8 }}>
-        Custom audio
-      </div>
+      <h3 style={{ marginBottom: '.5rem' }}>Eigen audio</h3>
       {entries.map(([key, { name, url }]) => (
-        <div key={key} style={{
-          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4,
-          background: 'var(--bg3)', border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)', padding: '4px 8px',
-        }}>
-          <code style={{ fontSize: 11, color: 'var(--accent)', flex: '0 0 auto', minWidth: 80 }}>{key}</code>
-          <span style={{ fontSize: 11, color: 'var(--text3)', flex: 1, overflow: 'hidden',
-            textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-          <button onClick={() => new Audio(url).play()} title="Preview"
-            style={{ background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--text2)', fontSize: 13, padding: '0 2px' }}>▶</button>
-          <Btn small variant="danger" onClick={() => onRemove(key)}>✕</Btn>
+        <div key={key} className="audio-entry">
+          <code>{key}</code>
+          <span className="muted" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '.9rem' }}>
+            {name}
+          </span>
+          <button onClick={() => new Audio(url).play()} title="Voorbeluisteren"
+            style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '1rem' }}>▶</button>
+          <Btn small variant="danger" onClick={() => onRemove(key)} title="Verwijderen">✕</Btn>
         </div>
       ))}
     </div>
@@ -253,7 +242,7 @@ export function ScenarioEditor({
   }
   function addStep() {
     onStepsChange([...steps, {
-      id: `step-${Date.now()}`, label: 'New step', instruction: '',
+      id: `step-${Date.now()}`, label: 'Nieuwe stap', instruction: '',
       type: 'button', leds: {}, audioKey: null,
       expect_button: 'on_off', timeout_seconds: 30,
       on_correct: '', on_timeout: '',
@@ -317,7 +306,7 @@ export function ScenarioEditor({
     try {
       const zip = await JSZip.loadAsync(file);
       const scenarioEntry = zip.file('scenario.json');
-      if (!scenarioEntry) { alert('Invalid scenario ZIP: missing scenario.json'); return; }
+      if (!scenarioEntry) { alert('Ongeldig scenario-ZIP: scenario.json ontbreekt'); return; }
 
       const json = JSON.parse(await scenarioEntry.async('text'));
       const { steps: importedSteps, customAudio = {} } = json;
@@ -336,7 +325,7 @@ export function ScenarioEditor({
         onImportAudio(audioEntries);
       }
     } catch (err) {
-      alert(`Failed to import ZIP: ${err.message}`);
+      alert(`Importeren van ZIP mislukt: ${err.message}`);
     }
   }
 
@@ -344,27 +333,31 @@ export function ScenarioEditor({
 
   return (
     <Card>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <SectionLabel style={{ marginBottom: 0, flex: 1 }}>Scenario editor</SectionLabel>
-        <span style={{ fontSize: 11, color: 'var(--text3)' }}>{steps.length} steps</span>
-        <Btn small variant="ghost" onClick={exportZip}>
-          Export{hasCustomAudio ? ` (${customAudioKeys.length} audio)` : ''}
-        </Btn>
-        <label style={{ cursor: 'pointer' }}>
-          <Btn small variant="ghost" style={{ pointerEvents: 'none' }}>Import</Btn>
-          <input type="file" accept=".zip" onChange={importZip} style={{ display: 'none' }} />
-        </label>
-        <Btn small variant="ghost" onClick={() => setOpen(o => !o)}>
-          {open ? 'Hide ▴' : 'Edit ▾'}
-        </Btn>
+      <div className="card-heading">
+        <div>
+          <h2>Scenario-editor</h2>
+          <p className="muted">{steps.length} stappen</p>
+        </div>
+        <div className="button-row">
+          <Btn small variant="secondary" onClick={exportZip}>
+            Exporteren{hasCustomAudio ? ` (${customAudioKeys.length} audio)` : ''}
+          </Btn>
+          <label style={{ cursor: 'pointer' }}>
+            <Btn small variant="secondary" style={{ pointerEvents: 'none' }}>Importeren</Btn>
+            <input type="file" accept=".zip" onChange={importZip} style={{ display: 'none' }} />
+          </label>
+          <Btn small variant="secondary" onClick={() => setOpen(o => !o)} aria-expanded={open}>
+            {open ? 'Inklappen' : 'Bewerken'}
+          </Btn>
+        </div>
       </div>
 
       {open && (
-        <div style={{ marginTop: 12 }}>
+        <div className="editor">
           {disabled && (
-            <div style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 8 }}>
-              Stop the session to edit the scenario.
-            </div>
+            <p className="message error" style={{ marginTop: 0 }}>
+              Stop de oefening om het scenario aan te passen.
+            </p>
           )}
 
           <AudioBankSection
@@ -373,12 +366,12 @@ export function ScenarioEditor({
           />
 
           {!disabled && steps.map((step, i) => (
-            <div key={step.id + i} style={{ display: 'flex', gap: 6 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 10 }}>
-                <Btn small variant="ghost" onClick={() => moveStep(i, -1)} disabled={i === 0}>▴</Btn>
-                <Btn small variant="ghost" onClick={() => moveStep(i, 1)} disabled={i === steps.length - 1}>▾</Btn>
+            <div key={step.id + i} className="step-row" style={{ marginBottom: '.6rem' }}>
+              <div className="move-buttons">
+                <Btn small variant="secondary" onClick={() => moveStep(i, -1)} disabled={i === 0} title="Omhoog">▴</Btn>
+                <Btn small variant="secondary" onClick={() => moveStep(i, 1)} disabled={i === steps.length - 1} title="Omlaag">▾</Btn>
               </div>
-              <div style={{ flex: 1 }}>
+              <div>
                 <StepEditor
                   step={step}
                   onChange={updated => updateStep(i, updated)}
@@ -391,8 +384,8 @@ export function ScenarioEditor({
             </div>
           ))}
           {!disabled && (
-            <Btn variant="ghost" onClick={addStep} style={{ width: '100%', marginTop: 4 }}>
-              + Add step
+            <Btn variant="secondary" onClick={addStep} style={{ width: '100%' }}>
+              + Stap toevoegen
             </Btn>
           )}
         </div>

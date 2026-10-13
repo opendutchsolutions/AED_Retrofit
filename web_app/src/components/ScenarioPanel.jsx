@@ -1,73 +1,76 @@
 import React from 'react';
-import { Card, SectionLabel, Btn, Badge, Divider } from './UI';
+import { Card, Btn, Badge, Divider } from './UI';
 
 function formatTime(s) {
   if (s == null) return null;
   const m = Math.floor(s / 60);
   const sec = s % 60;
-  return m > 0 ? `${m}:${String(sec).padStart(2,'0')}` : `${sec}s`;
+  return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `${sec}s`;
 }
 
 const TYPE_BADGE = {
-  button: { label: 'awaiting button', color: 'amber' },
-  timed:  { label: 'timed',          color: 'blue'  },
-  branch: { label: 'branch',         color: 'purple' },
-  end:    { label: 'complete',       color: 'green'  },
+  button: { label: 'wacht op knop',    color: 'amber' },
+  timed:  { label: 'automatische fase', color: 'blue' },
+  branch: { label: 'keuzemoment',      color: 'purple' },
+  end:    { label: 'afgerond',        color: 'green' },
 };
 
 export function ScenarioPanel({
   running, currentStep, waitingBranch, timeLeft,
-  onStart, onStop, onChooseBranch,
+  onStart, onStop, onChooseBranch, onSkipPhase,
   language, onLanguageChange,
   connected,
 }) {
   const badge = currentStep ? TYPE_BADGE[currentStep.type] : null;
+  const isTimedPhase = running && currentStep?.type === 'timed';
 
   return (
     <Card>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <SectionLabel style={{ marginBottom: 0, flex: 1 }}>Scenario</SectionLabel>
-        <select
-          value={language}
-          onChange={e => onLanguageChange(e.target.value)}
-          disabled={running}
-          style={{ fontSize: 12, padding: '3px 8px' }}
-        >
-          <option>Nederlands</option>
-          <option>Duits</option>
-        </select>
-        {!running
-          ? <Btn variant={connected ? 'success' : 'amber'} onClick={onStart}>
-              {connected ? 'Start session' : 'Simulate'}
-            </Btn>
-          : <Btn variant="danger" onClick={onStop}>Stop</Btn>
-        }
-      </div>
+      <h2>Instructeurbediening</h2>
+      {!running && (
+        <p className="hint">
+          Stuur de oefening aan: bepaal de analyse-uitkomst en beheer de
+          compressie-/ventilatiefase.
+        </p>
+      )}
+
+      {!running && (
+        <div className="field" style={{ marginTop: '.8rem' }}>
+          <label htmlFor="language-select">Taal van de gesproken instructies</label>
+          <select
+            id="language-select"
+            value={language}
+            onChange={e => onLanguageChange(e.target.value)}
+            style={{ maxWidth: '20rem' }}
+          >
+            <option>Nederlands</option>
+            <option>Duits</option>
+          </select>
+        </div>
+      )}
 
       {!running && !currentStep && (
-        <div style={{ color: 'var(--text3)', fontSize: 13, padding: '24px 0', textAlign: 'center' }}>
-          {connected
-            ? 'Press Start session to begin.'
-            : 'Press Simulate to run without hardware, or connect a device first.'}
+        <div className="empty">
+          <p>{connected
+            ? 'Kies Start oefening om te beginnen.'
+            : 'Kies Start oefening (simulatie) om zonder hardware te oefenen, of verbind eerst een apparaat.'}</p>
+          <Btn variant="warning" onClick={onStart}>
+            {connected ? 'Start oefening' : 'Start oefening (simulatie)'}
+          </Btn>
         </div>
       )}
 
       {currentStep && (
         <>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{currentStep.label}</div>
-              <div style={{ color: 'var(--text2)', fontSize: 13, lineHeight: 1.5 }}>{currentStep.instruction}</div>
+          <div className="card-heading" style={{ marginTop: '.8rem' }}>
+            <div>
+              <h3>{currentStep.label}</h3>
+              <p className="muted">{currentStep.instruction}</p>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
               {badge && <Badge color={badge.color}>{badge.label}</Badge>}
               {timeLeft != null && (
-                <div style={{
-                  fontFamily: 'var(--mono)', fontSize: 20, fontWeight: 500,
-                  color: timeLeft <= 10 ? 'var(--red)' : 'var(--text)',
-                }}>
-                  {formatTime(timeLeft)}
-                </div>
+                <div className={`timer${timeLeft <= 10 ? ' urgent' : ''}`}>{formatTime(timeLeft)}</div>
               )}
             </div>
           </div>
@@ -75,7 +78,7 @@ export function ScenarioPanel({
           {waitingBranch && currentStep.choices && (
             <>
               <Divider />
-              <SectionLabel>Select outcome</SectionLabel>
+              <h3 style={{ marginBottom: '.5rem' }}>Maak een keuze</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {currentStep.choices.map((c, i) => (
                   <Btn
@@ -88,6 +91,26 @@ export function ScenarioPanel({
                   </Btn>
                 ))}
               </div>
+            </>
+          )}
+
+          {running && (
+            <>
+              <Divider />
+              <h3 style={{ marginBottom: '.5rem' }}>Bediening</h3>
+              <div className="button-row">
+                {isTimedPhase && (
+                  <Btn variant="warning" onClick={onSkipPhase}>
+                    Fase inkorten
+                  </Btn>
+                )}
+                <Btn variant="danger" onClick={onStop}>Oefening beëindigen</Btn>
+              </div>
+              <p className="hint">
+                {isTimedPhase
+                  ? '"Fase inkorten" springt direct naar de volgende stap in het scenario.'
+                  : 'De fase loopt automatisch af of wacht op een knop van de deelnemer.'}
+              </p>
             </>
           )}
         </>
