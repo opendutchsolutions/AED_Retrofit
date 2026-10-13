@@ -4,12 +4,19 @@ on:
   push:
     branches:
       - main
+  # Commits pushed by the firmware workflow use GITHUB_TOKEN, which does
+  # not trigger push-based workflows — chain on its completion instead
+  workflow_run:
+    workflows: ["Build, sign & publish firmware"]
+    types: [completed]
 
 permissions:
   contents: write
 
 jobs:
   deploy:
+    # On the workflow_run trigger, only deploy when the firmware build succeeded
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     defaults:
       run:
