@@ -3,7 +3,6 @@ import { useBLE } from './hooks/useBLE';
 import { useAudio } from './hooks/useAudio';
 import { useSimulation } from './hooks/useSimulation';
 import { StatusChip, ConnectCard } from './components/StatusBar';
-import { AudioConnectionCard } from './components/AudioConnection';
 import { ScenarioPanel } from './components/ScenarioPanel';
 import { AedDevicePanel } from './components/AedDevicePanel';
 import { HardwarePanel } from './components/HardwarePanel';
@@ -81,11 +80,7 @@ function DeviceStatusCard({ status, deviceName, running, ledMask }) {
 
 export default function App() {
   const [screen, setScreen] = useState('verbinden');
-  const { play: playAudio, setSink } = useAudio();
-
-  const handleSinkChange = useCallback((deviceId) => {
-    setSink(deviceId);
-  }, [setSink]);
+  const { play: playAudio } = useAudio();
 
   // Forward ref so BLE hook can call into sim without circular dependency
   const simRef = useRef(null);
@@ -151,10 +146,6 @@ export default function App() {
                   knownDevices={ble.knownDevices}
                   onReconnect={ble.reconnect}
                   available={ble.available}
-                />
-                <AudioConnectionCard
-                  onSinkChange={handleSinkChange}
-                  onTestAudio={() => playAudio('audio/Nederlands/1_Warning.mp3')}
                 />
                 <Card>
                   <h2>Geen apparaat beschikbaar?</h2>
