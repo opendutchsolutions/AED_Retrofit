@@ -42,6 +42,7 @@
 #include "gatt_service.h"
 #include "kvstore.h"
 #include "l2cap.h"
+#include "ota.h"
 #include "sdp.h"
 #include <btstack_event.h>
 #include <btstack_run_loop.h>
@@ -223,6 +224,7 @@ void bt_begin(const char *name, const char *pin, bt_on_up_cb_t cb, void *data) {
   sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
   sm_set_authentication_requirements(0);
   gatt_service_init();
+  ota_init();
 
   gap_set_local_name(_name); // Classic BT name
   gap_discoverable_control(1);

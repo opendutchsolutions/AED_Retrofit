@@ -18,3 +18,17 @@ PRIMARY_SERVICE,
     // bit0=classic peer address stored, bit1=classic link connected
     CHARACTERISTIC,
     0xFF13, READ | NOTIFY, 0
+
+// OTA update service
+PRIMARY_SERVICE,
+    0xFF20
+
+    // --- Control & status (read + write + notify) ---
+    // write: [0x01][size:u32][crc32:u32] start, [0x02] finish, [0x03] abort
+    // read/notify: [state:u8][progress:u32][error:u8]
+    CHARACTERISTIC,
+    0xFF21, READ | WRITE | NOTIFY, 0
+
+    // --- Image data (write without response) ---
+    CHARACTERISTIC,
+    0xFF22, WRITE_WITHOUT_RESPONSE, 0

@@ -50,6 +50,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/a2dp.c
     src/avrcp.c
     src/gatt_service.c
+    src/ota.c
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -60,6 +61,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     #CONN_PIN=26
     BT_PIN="0000"
     BT_NAME="AED-Simulator-1"
+    PICO_CRT0_IMAGE_TYPE_TBYB=1
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -72,7 +74,13 @@ target_link_libraries(${PROJECT_NAME}
     pico_btstack_classic
     pico_btstack_cyw43
     pico_cyw43_arch_none
+    boot_uf2_headers
 )
+
+# TBYB signed image: the RP2350 bootrom verifies the signature during the
+# OTA flash-update boot (see src/ota.c and partitions.json)
+pico_hash_binary(${PROJECT_NAME})
+pico_sign_binary(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/signing_key.pem)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR} # For btstack config
