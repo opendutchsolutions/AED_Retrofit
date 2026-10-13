@@ -100,7 +100,8 @@ export function useOta({ getDevice }) {
         const s = e.target.value.getUint8(0);
         if (s === OTA_STATE.RECEIVING) {
           ackCount++;
-          return; // per-sector ACKs are logged by the block loop instead
+          if (ackCount === 1) addLog('Apparaat bevestigt START (melding ontvangen)');
+          return; // per-sector ACKs are counted, not logged
         }
         addLog(`Apparaatstatus: ${stateName[s] || s}`, s === OTA_STATE.ERROR ? 'err' : s === OTA_STATE.READY ? 'ok' : 'info');
         if (s === OTA_STATE.READY || s === OTA_STATE.ERROR) finalState = s;
@@ -140,6 +141,7 @@ export function useOta({ getDevice }) {
       // flush, and the pace adapts to the actual flash speed.
       const FLASH_BLOCK = 4096;
       const ACK_TIMEOUT_MS = 2000;
+      const FLUSH_PAUSE_MS = 250;
       const waitForAck = async (expected) => {
         const deadline = Date.now() + ACK_TIMEOUT_MS;
         while (ackCount < expected && Date.now() < deadline) {
@@ -186,10 +188,15 @@ export function useOta({ getDevice }) {
             if (block === 1) {
               addLog(`Sectie-bevestigingen ontvangen — stop-and-wait pacing actief (${FLASH_BLOCK / 1024} kB per blok)`);
             }
-          } else if (!ackTimeoutWarned) {
-            ackTimeoutWarned = true;
-            addLog(`Geen sectie-bevestiging na ${ACK_TIMEOUT_MS} ms — apparaat stuurt geen ACKs, verder met vaste pauze`, 'warn');
-            await sleep(250);
+          } else {
+            // No ACK (e.g. iOS shims that don't deliver notifications
+            // during streaming): always fall back to fixed pacing —
+            // the flush stall still needs the breathing room.
+            if (!ackTimeoutWarned) {
+              ackTimeoutWarned = true;
+              addLog(`Geen sectie-bevestiging na ${ACK_TIMEOUT_MS} ms — verder met vaste pauze van ${FLUSH_PAUSE_MS} ms per blok`, 'warn');
+            }
+            await sleep(FLUSH_PAUSE_MS);
           }
         }
         if (off - lastReported >= blob.length / 10 || off === blob.length) {
@@ -205,12 +212,38 @@ export function useOta({ getDevice }) {
       await ctrl.writeValue(new Uint8Array([0x02]));
       addLog('FINISH verstuurd — apparaat controleert CRC + handtekening');
 
+      // Wait for the verdict: via notification when the browser delivers
+      // them, otherwise by polling the readable ctrl state (some iOS Web
+      // Bluetooth shims don't surface notifications during streaming).
+      let polledState = null;
       const deadline = Date.now() + 30000;
-      while (finalState === null && Date.now() < deadline) await sleep(200);
+      while (finalState === null && polledState === null && Date.now() < deadline) {
+        await sleep(300);
+        if (finalState !== null) break;
+        if (!dev.gatt?.connected) {
+          // The only code path that reboots the device after FINISH is a
+          // passed CRC + signature verify, so a post-FINISH disconnect
+          // means the update was accepted and the device is restarting.
+          ctrl.removeEventListener('characteristicvaluechanged', onNotify);
+          addLog('Verbinding verbroken na de controle — het apparaat past de update toe en start opnieuw op', 'ok');
+          setProgress(1);
+          setStatus('Update voltooid. De oefen-AED start opnieuw op met de nieuwe firmware.');
+          return true;
+        }
+        try {
+          const v = await ctrl.readValue();
+          const s = v.getUint8(0);
+          if (s === OTA_STATE.READY || s === OTA_STATE.ERROR) {
+            polledState = s;
+            addLog(`Eindstatus via polling: ${stateName[s] || s}`, s === OTA_STATE.ERROR ? 'err' : 'info');
+          }
+        } catch (_) { /* read may fail while the device reboots */ }
+      }
+      const verdict = finalState ?? polledState;
       ctrl.removeEventListener('characteristicvaluechanged', onNotify);
 
-      if (finalState === OTA_STATE.ERROR) throw new Error('controle mislukt (CRC)');
-      if (finalState === null) throw new Error('geen antwoord van het apparaat');
+      if (verdict === OTA_STATE.ERROR) throw new Error('controle mislukt (CRC of handtekening)');
+      if (verdict == null) throw new Error('geen antwoord van het apparaat');
       setProgress(1);
       addLog('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.', 'ok');
       setStatus('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.');
