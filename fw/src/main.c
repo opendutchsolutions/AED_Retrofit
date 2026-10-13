@@ -31,6 +31,7 @@
 #include "ota.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
+#include "pico/stdio_usb.h"
 #include "kvstore.h"
 
 void fatal(void) {
@@ -82,6 +83,14 @@ static void led_pins_init(void) {
 
 int main(void) {
   stdio_init_all();
+
+  // The USB CDC stack drops output until the host opens the port, which
+  // takes ~1s after a reset. Wait briefly so boot logs are not lost.
+  absolute_time_t log_deadline = make_timeout_time_ms(2000);
+  while (!stdio_usb_connected() && time_reached(log_deadline) == false) {
+    sleep_ms(10);
+  }
+  printf("AED-Simulator firmware v%s\n", FW_VERSION);
 
   // Initialize CYW43 driver architecture
   if (cyw43_arch_init()) {
