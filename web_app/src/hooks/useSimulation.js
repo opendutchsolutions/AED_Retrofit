@@ -6,6 +6,7 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
   const [running, setRunning]       = useState(false);
   const [currentStepId, setCurrentStepId] = useState(null);
   const [waitingBranch, setWaitingBranch] = useState(false);
+  const [expectedButton, setExpectedButton] = useState(null);
   const [timeLeft, setTimeLeft]     = useState(null);
   const [sessionLog, setSessionLog] = useState([]);
   const [language, setLanguage]     = useState('Nederlands');
@@ -42,6 +43,7 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
     setTimeLeft(null);
     expectBtn.current    = null;
     onTimeoutRef.current = null;
+    setExpectedButton(null);
   }, []);
 
   const gotoStep = useCallback((id) => {
@@ -75,6 +77,7 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
 
     if (step.type === 'button') {
       expectBtn.current = step.expect_button;
+      setExpectedButton(step.expect_button);
 
       if (step.timeout_seconds) {
         setTimeLeft(step.timeout_seconds);
@@ -143,6 +146,21 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
     gotoStep(nextId);
   }, [gotoStep, logSession]);
 
+  // Instructor bypass: shorten the current timed phase (e.g. CPR cycle)
+  // by jumping straight to its on_complete step.
+  const skipPhase = useCallback(() => {
+    if (!runningRef.current) return;
+    const step = stepMap.current[currentStepIdRef.current];
+    if (!step) return;
+    const next = step.type === 'timed' ? step.on_complete : step.on_correct;
+    if (!next) {
+      logSession(`Kan fase "${step.label}" niet inkorten: geen vervolgstap`, 'warn');
+      return;
+    }
+    logSession(`Instructeur kortte "${step.label}" in`, 'warn');
+    gotoStep(next);
+  }, [gotoStep, logSession]);
+
   // Called by BLE hook on button notify.
   // Reads running/currentStepId from refs so it never has a stale closure —
   // the previous bug was that if the re-render hadn't committed yet after a
@@ -165,10 +183,10 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio }) {
   const currentStep = currentStepId ? stepMap.current[currentStepId] : null;
 
   return {
-    running, currentStep, waitingBranch, timeLeft, sessionLog,
+    running, currentStep, waitingBranch, expectedButton, timeLeft, sessionLog,
     language, setLanguage,
     steps, setSteps,
-    start, stop, chooseBranch, handleButton, clearSessionLog,
+    start, stop, chooseBranch, skipPhase, handleButton, clearSessionLog,
     audioBank:          audioBank.bank,
     addAudioFile:       audioBank.addFile,
     removeAudioFile:    audioBank.removeFile,

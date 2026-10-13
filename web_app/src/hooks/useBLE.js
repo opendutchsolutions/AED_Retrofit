@@ -13,6 +13,8 @@ export function useBLE({ onButtonChange } = {}) {
   const [ledMask, setLedMaskState] = useState(0);
   const [btnMask, setBtnMask]   = useState(0);
   const [log, setLog]           = useState([]);
+  const [knownDevices, setKnownDevices] = useState([]);
+  const [available, setAvailable] = useState(null); // null = unknown/unsupported
 
   const deviceRef  = useRef(null);
   const charBtns   = useRef(null);
@@ -59,6 +61,30 @@ export function useBLE({ onButtonChange } = {}) {
     addLog('Disconnected', 'err');
   }, [stopPoll, addLog]);
 
+  // Shared GATT setup for both a fresh requestDevice() and a getDevices() reconnect.
+  const attachDevice = useCallback(async (dev) => {
+    const server  = await dev.gatt.connect();
+    const service = await server.getPrimaryService(SVC);
+    charBtns.current = await service.getCharacteristic(CBTNS);
+    charLeds.current = await service.getCharacteristic(CLEDS);
+
+    charBtns.current.addEventListener('characteristicvaluechanged', onNotify);
+    await charBtns.current.startNotifications();
+
+    const initBtn = await charBtns.current.readValue();
+    const initLed = await charLeds.current.readValue();
+    const bm = initBtn.getUint8(0);
+    const lm = initLed.getUint8(0);
+    setBtnMask(bm);
+    ledMaskRef.current = lm;
+    setLedMaskState(lm);
+
+    startPoll();
+    setStatus('connected');
+    setDeviceName(dev.name || 'AED');
+    addLog(`Connected — ${dev.name || 'AED'}`, 'ok');
+  }, [onNotify, startPoll, addLog]);
+
   const connect = useCallback(async () => {
     if (!navigator.bluetooth) { addLog('Web Bluetooth not available', 'err'); return; }
     setStatus('scanning');
@@ -70,33 +96,57 @@ export function useBLE({ onButtonChange } = {}) {
       });
       deviceRef.current = dev;
       dev.addEventListener('gattserverdisconnected', onDisconnect);
-
-      const server  = await dev.gatt.connect();
-      const service = await server.getPrimaryService(SVC);
-      charBtns.current = await service.getCharacteristic(CBTNS);
-      charLeds.current = await service.getCharacteristic(CLEDS);
-
-      charBtns.current.addEventListener('characteristicvaluechanged', onNotify);
-      await charBtns.current.startNotifications();
-
-      const initBtn = await charBtns.current.readValue();
-      const initLed = await charLeds.current.readValue();
-      const bm = initBtn.getUint8(0);
-      const lm = initLed.getUint8(0);
-      setBtnMask(bm);
-      ledMaskRef.current = lm;
-      setLedMaskState(lm);
-
-      startPoll();
-      setStatus('connected');
-      setDeviceName(dev.name || 'AED');
-      addLog(`Connected — ${dev.name || 'AED'}`, 'ok');
+      await attachDevice(dev);
     } catch(e) {
       setStatus('disconnected');
       deviceRef.current = null;
       addLog(e.message || 'Connection failed', 'err');
     }
-  }, [onDisconnect, onNotify, startPoll, addLog]);
+  }, [onDisconnect, attachDevice, addLog]);
+
+  // Reconnect a device previously granted to this site (Bluetooth.getDevices()).
+  const reconnect = useCallback(async (dev) => {
+    if (!dev?.gatt) return;
+    setStatus('scanning');
+    addLog('Opnieuw verbinden…');
+    try {
+      deviceRef.current = dev;
+      dev.addEventListener('gattserverdisconnected', onDisconnect);
+      await attachDevice(dev);
+    } catch (e) {
+      setStatus('disconnected');
+      deviceRef.current = null;
+      addLog(e.message || 'Reconnection failed', 'err');
+    }
+  }, [onDisconnect, attachDevice, addLog]);
+
+  // Query the Web Bluetooth API for devices this site connected to before,
+  // so the instructor can reconnect the AED Simulator without the picker.
+  useEffect(() => {
+    if (!navigator.bluetooth?.getDevices) return;
+    let cancelled = false;
+    navigator.bluetooth.getDevices()
+      .then((devs) => { if (!cancelled) setKnownDevices(devs); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Bluetooth.getAvailability(): is there a Bluetooth radio at all?
+  // availabilitychanged fires when the user turns Bluetooth on/off.
+  useEffect(() => {
+    const bt = navigator.bluetooth;
+    if (!bt?.getAvailability) return;
+    let cancelled = false;
+    bt.getAvailability()
+      .then((a) => { if (!cancelled) setAvailable(a); })
+      .catch(() => {});
+    const onAvail = (e) => setAvailable(!!e.value);
+    bt.addEventListener?.('availabilitychanged', onAvail);
+    return () => {
+      cancelled = true;
+      bt.removeEventListener?.('availabilitychanged', onAvail);
+    };
+  }, []);
 
   const disconnect = useCallback(() => {
     deviceRef.current?.gatt?.disconnect();
@@ -138,8 +188,8 @@ export function useBLE({ onButtonChange } = {}) {
   }, []);
 
   return {
-    status, deviceName, ledMask, btnMask, log,
-    connect, disconnect,
+    status, deviceName, ledMask, btnMask, log, knownDevices, available,
+    connect, disconnect, reconnect,
     setLed, setLedMask, allLedsOff, writeLeds,
     simulateButton, addLog,
   };
