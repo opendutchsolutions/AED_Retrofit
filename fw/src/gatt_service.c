@@ -64,6 +64,7 @@ static btstack_packet_callback_registration_t _hci_cb_reg;
 static att_service_handler_t _service_handler;
 static btstack_timer_source_t _btn_timer;
 static btstack_timer_source_t _conn_param_timer;
+static btstack_timer_source_t _classic_reconnect_timer;
 static bool _timers_running = false;
 static volatile hci_con_handle_t _pending_param_handle = HCI_CON_HANDLE_INVALID;
 
@@ -77,6 +78,15 @@ static void conn_param_timer_cb(btstack_timer_source_t *ts) {
                                             600);
     _pending_param_handle = HCI_CON_HANDLE_INVALID;
   }
+}
+
+// Restore the classic audio link only after the BLE central has finished
+// its GATT discovery — paging immediately disrupts that setup on the
+// dual-mode controller and the web app fails to find the characteristics.
+static void classic_reconnect_timer_cb(btstack_timer_source_t *ts) {
+  UNUSED(ts);
+  printf("[gatt] BLE settled — restoring classic audio link\n");
+  bt_reconnect_classic();
 }
 
 static void apply_leds(uint8_t mask) {
@@ -211,8 +221,12 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel,
       btstack_run_loop_set_timer_handler(&_conn_param_timer,
                                          conn_param_timer_cb);
       btstack_run_loop_add_timer(&_conn_param_timer);
-      // BLE (control) connect also restores the Classic audio link
-      bt_reconnect_classic();
+      // Restore the classic audio link after the central finished its GATT
+      // discovery (see classic_reconnect_timer_cb) — not immediately
+      btstack_run_loop_set_timer(&_classic_reconnect_timer, 2000);
+      btstack_run_loop_set_timer_handler(&_classic_reconnect_timer,
+                                         classic_reconnect_timer_cb);
+      btstack_run_loop_add_timer(&_classic_reconnect_timer);
     }
     break;
 
@@ -222,6 +236,7 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel,
     if (handle == _conn_handle) {
       _conn_handle = HCI_CON_HANDLE_INVALID;
       _btn_notify_en = 0;
+      btstack_run_loop_remove_timer(&_classic_reconnect_timer);
       printf("[gatt] BLE disconnected\n");
     }
     break;
