@@ -146,7 +146,10 @@ export function useOta({ getDevice, setOtaActive }) {
         throw new Error('geen geldige handtekening (64 bytes vereist)');
       }
       blob.set(sig, bytes.length);
-      let chunk = 240;
+      // 128 bytes is safe on every platform (works at the default MTU 23
+      // range negotiated by iOS ~185; a too-large write-with-response can
+      // hang the iOS shim instead of erroring, so don't gamble on 240)
+      let chunk = 128;
       let lastReported = 0;
       let ackTimeoutWarned = false;
       // Write-with-response only: each packet is acknowledged round-trip,
