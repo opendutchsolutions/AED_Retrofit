@@ -61,7 +61,6 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     #CONN_PIN=26
     BT_PIN="0000"
     BT_NAME="AED-Simulator-1"
-    PICO_CRT0_IMAGE_TYPE_TBYB=1
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -77,8 +76,10 @@ target_link_libraries(${PROJECT_NAME}
     boot_uf2_headers
 )
 
-# TBYB signed image: the RP2350 bootrom verifies the signature during the
-# OTA flash-update boot (see src/ota.c and partitions.json)
+# Signed image (no TBYB): the RP2350 bootrom verifies the signature during
+# the OTA flash-update boot and commits it immediately. TBYB was removed:
+# its try/buy machinery re-ran the flash update on every reset and could
+# wedge the device in an invisible ROM retry loop.
 pico_hash_binary(${PROJECT_NAME})
 pico_sign_binary(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/signing_key.pem)
 

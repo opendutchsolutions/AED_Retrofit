@@ -83,6 +83,9 @@ static void led_pins_init(void) {
 int main(void) {
   stdio_init_all();
 
+  // Commit an OTA flash-update boot before anything else can reset us
+  ota_check_flash_update_boot();
+
   // Initialize CYW43 driver architecture
   if (cyw43_arch_init()) {
     printf("Failed to init cyw43_arch\n");
@@ -96,12 +99,11 @@ int main(void) {
   if (!kvs_init()) {
     printf("kvs_init failed\n");
   }
-  // Commit an OTA update if this boot was the flash-update boot
-  ota_check_flash_update_boot();
   bt_begin(BT_NAME, BT_PIN, on_bt_up, NULL);
   led_pins_init();
 
   printf("Setup done\n");
+  ota_print_diagnostics();
 
   bt_run();
 

@@ -74,6 +74,7 @@ static uint32_t _buf_fill = 0;
 static uint8_t _sector_buf[FLASH_SECTOR_SIZE_4K];
 static uint32_t _staging_base = 0; // XIP address of the inactive partition
 static uint32_t _staging_size = 0;
+static int _last_boot_type = -1;
 
 static uint16_t _handle_service_start = 0;
 static uint16_t _handle_ctrl_value = 0;
@@ -403,11 +404,14 @@ void ota_init(void) {
 }
 
 void ota_check_flash_update_boot(void) {
-  if (rom_get_last_boot_type() == BOOT_TYPE_FLASH_UPDATE) {
+  _last_boot_type = rom_get_last_boot_type();
+  if (_last_boot_type == BOOT_TYPE_FLASH_UPDATE) {
+    // Non-TBYB images are committed by the bootrom itself; nothing to buy
     printf("[ota] booted from a flash update\n");
-    int rc = rom_explicit_buy(workarea, sizeof(workarea));
-    if (rc != 0) {
-      printf("[ota] explicit_buy returned %d\n", rc);
-    }
   }
+}
+
+void ota_print_diagnostics(void) {
+  printf("[ota] diag: boot type=%d staging=0x%08x (%u bytes)\n",
+         _last_boot_type, _staging_base, _staging_size);
 }

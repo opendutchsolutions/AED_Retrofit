@@ -348,8 +348,9 @@ static void event_handler(uint8_t event, uint8_t *packet) {
   case A2DP_SUBEVENT_STREAM_RELEASED:
     _stream_state = STREAM_STATE_CLOSED;
     media_processing_close();
-    // Reboot in 0.1s, since reconnect is buggy
-    watchdog_enable(100, true);
+    // No reboot here: a watchdog reset re-triggers the bootrom's TBYB
+    // flash-update cycle. Reconnection of the classic link is handled by
+    // the kv-store peer + bt_reconnect_classic on the next BLE connect.
     break;
 
   case A2DP_SUBEVENT_SIGNALING_CONNECTION_RELEASED:

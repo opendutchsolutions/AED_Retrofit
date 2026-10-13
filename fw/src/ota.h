@@ -20,9 +20,16 @@
 void ota_init(void);
 
 /**
- * @brief After boot: if this boot was a flash-update boot, buy (commit)
- *        the new image. Call once early from main().
+ * @brief After boot: report if this was a flash-update boot. Images are
+ *        signed without TBYB, so the bootrom commits them directly and
+ *        there is nothing to buy. Call once early from main().
  */
 void ota_check_flash_update_boot(void);
+
+/**
+ * @brief Print one diagnostics line with the last boot type, buy result
+ *        and resolved staging partition. Call after ota_init().
+ */
+void ota_print_diagnostics(void);
 
 #endif
