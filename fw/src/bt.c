@@ -161,16 +161,9 @@ static void packet_handler(uint8_t packet_type, uint16_t channel,
     break;
 
   case HCI_EVENT_CONNECTION_REQUEST:
-    hci_event_connection_request_get_bd_addr(packet, address);
-    if (_classic_suspended) {
-      // The phone may auto-reconnect classic audio right after the update
-      // dropped the link — reject it until the update finishes
-      printf("[bt] rejecting classic connection during firmware update\n");
-      hci_send_cmd(&hci_reject_connection_request, address,
-                   ERROR_CODE_CONNECTION_REJECTED_DUE_TO_LIMITED_RESOURCES);
-    } else {
-      printf("[bt] Classic connection request\n");
-    }
+    // Accept/reject is decided by classic_connection_filter (registered
+    // with gap_register_classic_connection_filter) — sending an HCI
+    // reject here races btstack's own accept machinery and loses.
     break;
 
   case HCI_EVENT_CONNECTION_COMPLETE: {
@@ -216,6 +209,20 @@ static void packet_handler(uint8_t packet_type, uint16_t channel,
   }
 }
 
+// Accept/reject filter for incoming BR/EDR connection requests. While an
+// OTA update is in progress the phone's classic-audio auto-reconnect must
+// be declined: the paging + A2DP signaling starves the BLE link (the
+// radio is shared) and the OTA connection dies with a supervision
+// timeout. Returning 0 makes btstack itself reject the request.
+static int classic_connection_filter(bd_addr_t addr, hci_link_type_t link_type) {
+  if (_classic_suspended) {
+    printf("[bt] declining classic connection from %s during firmware update\n",
+           bd_addr_to_str(addr));
+    return 0;
+  }
+  return 1;
+}
+
 void bt_begin(const char *name, const char *pin, bt_on_up_cb_t cb, void *data) {
   static bool _begun = false;
   if (_begun)
@@ -247,6 +254,7 @@ void bt_begin(const char *name, const char *pin, bt_on_up_cb_t cb, void *data) {
 
   _hci_registration.callback = &packet_handler;
   hci_add_event_handler(&_hci_registration);
+  gap_register_classic_connection_filter(classic_connection_filter);
 }
 
 void bt_run(void) {
