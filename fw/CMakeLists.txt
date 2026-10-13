@@ -78,10 +78,22 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR} # For btstack config
 )
 
-# --- pico-kvstore (vendored under lib/pico-kvstore, BSD-3-Clause) ---
+# --- pico-kvstore (https://github.com/oyama/pico-kvstore, BSD-3-Clause) ---
 # The upstream CMakeLists are standalone projects (they call pico_sdk_init()),
-# so define the library targets here directly, mirroring their definitions.
-set(KVSTORE_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/pico-kvstore)
+# so only the sources are fetched — SOURCE_SUBDIR points at a directory
+# without a CMakeLists.txt, preventing FetchContent from adding it.
+# The library targets are defined below, mirroring the upstream definitions.
+include(FetchContent)
+FetchContent_Declare(
+    pico-kvstore
+    GIT_REPOSITORY https://github.com/oyama/pico-kvstore.git
+    GIT_TAG        26a07c137ede5f13ee6318a8749417fa288ba31e
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  include
+)
+FetchContent_MakeAvailable(pico-kvstore)
+
+set(KVSTORE_DIR ${pico-kvstore_SOURCE_DIR})
 set(PICO_VFS_DIR ${KVSTORE_DIR}/lib/pico-vfs)
 
 add_library(blockdevice INTERFACE)
