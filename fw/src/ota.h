@@ -1,8 +1,9 @@
 /**
  * @file            ota.h
- * @brief           BLE OTA update — stages the image in the inactive app
- *                  partition and lets the RP2350 bootrom apply it
- *                  (flash-update boot, see RP2350 datasheet section 5)
+ * @brief           BLE OTA update service — stages the image in a fixed
+ *                  flash slot, verifies a P-256 ECDSA signature, and
+ *                  applies it at boot via a RAM-resident flasher
+ *                  (ota_apply.c)
  *
  * This file is part of the AED_RETROFIT project
  * SPDX-License-Identifier: EUPL-1.2
@@ -11,25 +12,20 @@
 #ifndef ota_h
 #define ota_h
 
+#include <pico.h>
 #include <stdbool.h>
 #include <stdint.h>
 
-/** UF2 family of our application images (rp2350-arm-s) */
-#define OTA_FAMILY_ID 0xe48bff57u
+/** Staging area: 1600K at the 1600K mark, below the kv-store region */
+#define OTA_STAGING_BASE (XIP_BASE + 0x00190000u)
+#define OTA_STAGING_SIZE (1600u * 1024u)
 
 void ota_init(void);
 
 /**
- * @brief After boot: report if this was a flash-update boot. Images are
- *        signed without TBYB, so the bootrom commits them directly and
- *        there is nothing to buy. Call once early from main().
+ * @brief At boot: apply a downloaded OTA image (if any) by flashing it
+ *        over the main firmware. Requires kvs_init() to have been called.
  */
-void ota_check_flash_update_boot(void);
-
-/**
- * @brief Print one diagnostics line with the last boot type, buy result
- *        and resolved staging partition. Call after ota_init().
- */
-void ota_print_diagnostics(void);
+void ota_apply_check_and_run(void);
 
 #endif

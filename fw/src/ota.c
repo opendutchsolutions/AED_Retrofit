@@ -1,23 +1,18 @@
 /**
  * @file            ota.c
  * @brief           BLE OTA GATT service (0xFF20) staging an incoming
- *                  firmware image in the inactive app partition; the
- *                  RP2350 bootrom applies it on reboot (flash-update boot)
+ *                  firmware image in the OTA slot; the image is verified
+ *                  (CRC32 + P-256 ECDSA) and applied at boot by ota_apply.c
  *
  * Protocol (little-endian):
  *   0xFF21 control/status — write commands, read + notify status:
  *     write [0x01][size:u32][crc32:u32]  start transfer
- *     write [0x02]                       finish (verify, reboot to apply)
- *     write [0x03]                       abort
+ *     write [0x04][sig:64]              signature (raw r||s) after the data
+ *     write [0x02]                      finish (verify, store, reboot)
+ *     write [0x03]                     abort
  *     status: [state:u8][progress:u32][error:u8]
  *   0xFF22 data — write without response, image bytes in order.
  *     Erased/programmed one 4KB sector at a time via ROM flash ops.
- *
- * Based on the pico-examples wifi ota_update example: the image is staged
- * in the partition that is not currently in use (resolved from the
- * partition table via the UF2 family ID), then
- * rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE) makes the bootrom
- * copy and verify it over the running image.
  *
  * This file is part of the AED_RETROFIT project
  * SPDX-License-Identifier: EUPL-1.2
@@ -28,18 +23,34 @@
 #include <ble/att_db_util.h>
 #include <ble/att_server.h>
 #include <btstack.h>
+#include <hardware/watchdog.h>
 #include <pico.h>
+#include <pico/bootrom.h>
+#include <pico/sha256.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "boot/picobin.h"
 #include "boot/picoboot.h"
-#include "boot/uf2.h"
-#include "pico/bootrom.h"
+#include "kvstore.h"
+#include "ota_pub_key.h"
+
+// Declared directly instead of including uECC.h: micro-ecc's asm-labelled
+// declarations confuse the Thumb linker. P-256, 64-byte key/signature.
+extern int uECC_verify(const uint8_t public_key[64], const uint8_t hash[32],
+                       const uint8_t signature[64]);
 
 #define OTA_SERVICE_UUID 0xFF20
 #define OTA_CTRL_UUID 0xFF21
 #define OTA_DATA_UUID 0xFF22
+
+#define KV_KEY_OTA_APPLY "ota_apply"
+#define OTA_APPLY_MAGIC 0x4F544131u /* "OTA1" */
+
+typedef struct {
+  uint32_t magic;
+  uint32_t size;
+  uint32_t crc;
+} ota_apply_record_t;
 
 #define FLASH_SECTOR_SIZE_4K 4096u
 #define FLASH_PAGE_SIZE_256 256u
@@ -54,16 +65,15 @@ typedef enum {
 
 typedef enum {
   OTA_ERR_NONE = 0,
-  OTA_ERR_NO_PARTITION = 1,
-  OTA_ERR_TOO_BIG = 2,
-  OTA_ERR_OVERFLOW = 3,
-  OTA_ERR_NOT_STARTED = 4,
-  OTA_ERR_INCOMPLETE = 5,
-  OTA_ERR_CRC = 6,
-  OTA_ERR_FLASH = 7,
+  OTA_ERR_TOO_BIG = 1,
+  OTA_ERR_OVERFLOW = 2,
+  OTA_ERR_NOT_STARTED = 3,
+  OTA_ERR_INCOMPLETE = 4,
+  OTA_ERR_CRC = 5,
+  OTA_ERR_FLASH = 6,
+  OTA_ERR_NO_SIGNATURE = 7,
+  OTA_ERR_BAD_SIGNATURE = 8,
 } ota_error_t;
-
-static __attribute__((aligned(4))) uint8_t workarea[4 * 1024];
 
 static ota_state_t _state = OTA_IDLE;
 static ota_error_t _error = OTA_ERR_NONE;
@@ -72,9 +82,8 @@ static uint32_t _image_crc = 0;
 static uint32_t _received = 0;
 static uint32_t _buf_fill = 0;
 static uint8_t _sector_buf[FLASH_SECTOR_SIZE_4K];
-static uint32_t _staging_base = 0; // XIP address of the inactive partition
-static uint32_t _staging_size = 0;
-static int _last_boot_type = -1;
+static uint8_t _signature[64];
+static bool _have_signature = false;
 
 static uint16_t _handle_service_start = 0;
 static uint16_t _handle_ctrl_value = 0;
@@ -130,43 +139,42 @@ static void set_error(ota_error_t err) {
   _state = OTA_ERROR;
   _received = 0;
   _buf_fill = 0;
+  _have_signature = false;
   notify_status();
 }
 
 static void reboot_timer_cb(btstack_timer_source_t *ts) {
   UNUSED(ts);
-  printf("[ota] rebooting for flash update from 0x%08x\n", _staging_base);
-  int rc = rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE, 100,
-                      _staging_base, 0);
-  printf("[ota] rom_reboot failed: %d\n", rc);
+  printf("[ota] rebooting to apply the update\n");
+  // Plain reset — the new image is applied at boot by ota_apply.c
+  watchdog_reboot(0, 0, 0);
 }
 
-// Resolve the partition that is not currently in use (the linked A/B pair
-// member) for the app image family.
-static bool resolve_staging_partition(void) {
-  resident_partition_t part;
-  rom_flash_flush_cache();
-  int rc = rom_get_uf2_target_partition(workarea, sizeof(workarea),
-                                        OTA_FAMILY_ID, &part);
-  if (rc != 0) {
-    printf("[ota] no target partition for family 0x%08x (rc=%d)\n",
-           OTA_FAMILY_ID, rc);
+// SHA-256 over the staged image, verified against the P-256 signature.
+static bool verify_signature(void) {
+  if (!_have_signature) {
     return false;
   }
-  uint16_t first_sector =
-      (part.permissions_and_location & PICOBIN_PARTITION_LOCATION_FIRST_SECTOR_BITS) >>
-      PICOBIN_PARTITION_LOCATION_FIRST_SECTOR_LSB;
-  uint16_t last_sector =
-      (part.permissions_and_location & PICOBIN_PARTITION_LOCATION_LAST_SECTOR_BITS) >>
-      PICOBIN_PARTITION_LOCATION_LAST_SECTOR_LSB;
-  _staging_base = XIP_BASE + first_sector * FLASH_SECTOR_SIZE_4K;
-  _staging_size = (last_sector + 1 - first_sector) * FLASH_SECTOR_SIZE_4K;
-  printf("[ota] staging partition: sectors %u-%u, base 0x%08x, %u bytes\n",
-         first_sector, last_sector, _staging_base, _staging_size);
-  return _staging_size > 0;
+  pico_sha256_state_t sha;
+  if (pico_sha256_start_blocking(&sha, SHA256_BIG_ENDIAN, false) != PICO_OK) {
+    return false;
+  }
+  // Stream the staged image 4KB at a time (it lives in XIP flash)
+  static uint8_t chunk[FLASH_SECTOR_SIZE_4K];
+  for (uint32_t off = 0; off < _received; off += sizeof(chunk)) {
+    uint32_t n = _received - off;
+    if (n > sizeof(chunk)) {
+      n = sizeof(chunk);
+    }
+    memcpy(chunk, (const uint8_t *)(OTA_STAGING_BASE + off), n);
+    pico_sha256_update_blocking(&sha, chunk, n);
+  }
+  sha256_result_t hash;
+  pico_sha256_finish(&sha, &hash);
+  return uECC_verify(OTA_PUB_KEY, hash.bytes, _signature) == 1;
 }
 
-// Erase + program one buffered sector into the staging partition using the
+// Erase + program one buffered sector of the staging area using the
 // ROM flash API (safe to call while running from flash).
 static bool flush_sector(void) {
   struct cflash_flags flags;
@@ -175,7 +183,7 @@ static bool flush_sector(void) {
       (CFLASH_OP_VALUE_ERASE << CFLASH_OP_LSB) |
       (CFLASH_SECLEVEL_VALUE_SECURE << CFLASH_SECLEVEL_LSB) |
       (CFLASH_ASPACE_VALUE_STORAGE << CFLASH_ASPACE_LSB);
-  ret = rom_flash_op(flags, _staging_base + _received,
+  ret = rom_flash_op(flags, OTA_STAGING_BASE + _received,
                      FLASH_SECTOR_SIZE_4K, NULL);
   if (ret != 0) {
     printf("[ota] erase failed: %d\n", ret);
@@ -186,7 +194,7 @@ static bool flush_sector(void) {
         (CFLASH_OP_VALUE_PROGRAM << CFLASH_OP_LSB) |
         (CFLASH_SECLEVEL_VALUE_SECURE << CFLASH_SECLEVEL_LSB) |
         (CFLASH_ASPACE_VALUE_STORAGE << CFLASH_ASPACE_LSB);
-    ret = rom_flash_op(flags, _staging_base + _received + off,
+    ret = rom_flash_op(flags, OTA_STAGING_BASE + _received + off,
                        FLASH_PAGE_SIZE_256, _sector_buf + off);
     if (ret != 0) {
       printf("[ota] program failed: %d\n", ret);
@@ -220,16 +228,34 @@ static void finish_transfer(void) {
   }
 
   printf("[ota] verifying %u bytes\n", _received);
-  uint32_t crc = crc32((const uint8_t *)_staging_base, _received);
+  uint32_t crc = crc32((const uint8_t *)OTA_STAGING_BASE, _received);
   if (crc != _image_crc) {
     printf("[ota] crc mismatch (got 0x%08x want 0x%08x)\n", crc, _image_crc);
     set_error(OTA_ERR_CRC);
     return;
   }
 
+  if (!verify_signature()) {
+    printf("[ota] signature verification failed\n");
+    set_error(_have_signature ? OTA_ERR_BAD_SIGNATURE : OTA_ERR_NO_SIGNATURE);
+    return;
+  }
+
+  ota_apply_record_t rec = {
+    .magic = OTA_APPLY_MAGIC,
+    .size = _received,
+    .crc = crc,
+  };
+  int rc = kvs_set(KV_KEY_OTA_APPLY, &rec, sizeof(rec));
+  if (rc != KVSTORE_SUCCESS) {
+    printf("[ota] could not store apply record: %s\n", kvs_strerror(rc));
+    set_error(OTA_ERR_FLASH);
+    return;
+  }
+
   _state = OTA_READY;
   notify_status();
-  // Give the notification time to go out, then let the bootrom apply it
+  // Give the notification time to go out, then reset
   btstack_run_loop_set_timer(&_reboot_timer, 500);
   btstack_run_loop_set_timer_handler(&_reboot_timer, reboot_timer_cb);
   btstack_run_loop_add_timer(&_reboot_timer);
@@ -271,7 +297,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     }
     uint32_t img_size = little_endian_read_32(buffer, 1);
     uint32_t img_crc = little_endian_read_32(buffer, 5);
-    if (img_size == 0 || img_size > _staging_size) {
+    if (img_size == 0 || img_size > OTA_STAGING_SIZE) {
       set_error(OTA_ERR_TOO_BIG);
       return;
     }
@@ -279,6 +305,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _image_crc = img_crc;
     _received = 0;
     _buf_fill = 0;
+    _have_signature = false;
     _error = OTA_ERR_NONE;
     _state = OTA_RECEIVING;
     printf("[ota] start: %u bytes, crc 0x%08x\n", img_size, img_crc);
@@ -293,7 +320,16 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _error = OTA_ERR_NONE;
     _received = 0;
     _buf_fill = 0;
+    _have_signature = false;
     notify_status();
+    break;
+  case 0x04: // SIGNATURE [raw r||s : 64]
+    if (size < 1 + sizeof(_signature)) {
+      return;
+    }
+    memcpy(_signature, buffer + 1, sizeof(_signature));
+    _have_signature = true;
+    printf("[ota] signature received\n");
     break;
   default:
     break;
@@ -370,12 +406,6 @@ static void ota_hci_handler(uint8_t packet_type, uint16_t channel,
 }
 
 void ota_init(void) {
-  if (!resolve_staging_partition()) {
-    // No partition table — the flash-update boot has nowhere to stage
-    printf("[ota] no staging partition, OTA disabled\n");
-    return;
-  }
-
   _handle_service_start = att_db_util_add_service_uuid16(OTA_SERVICE_UUID);
 
   _handle_ctrl_value = att_db_util_add_characteristic_uuid16(
@@ -399,19 +429,6 @@ void ota_init(void) {
   _hci_cb_reg.callback = &ota_hci_handler;
   hci_add_event_handler(&_hci_cb_reg);
 
-  printf("[ota] service ready (ctrl=%d data=%d)\n", _handle_ctrl_value,
-         _handle_data_value);
-}
-
-void ota_check_flash_update_boot(void) {
-  _last_boot_type = rom_get_last_boot_type();
-  if (_last_boot_type == BOOT_TYPE_FLASH_UPDATE) {
-    // Non-TBYB images are committed by the bootrom itself; nothing to buy
-    printf("[ota] booted from a flash update\n");
-  }
-}
-
-void ota_print_diagnostics(void) {
-  printf("[ota] diag: boot type=%d staging=0x%08x (%u bytes)\n",
-         _last_boot_type, _staging_base, _staging_size);
+  printf("[ota] service ready (ctrl=%d data=%d, staging 0x%08x)\n",
+         _handle_ctrl_value, _handle_data_value, OTA_STAGING_BASE);
 }

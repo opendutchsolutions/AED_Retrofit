@@ -51,6 +51,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/avrcp.c
     src/gatt_service.c
     src/ota.c
+    src/ota_apply.c
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -74,14 +75,25 @@ target_link_libraries(${PROJECT_NAME}
     pico_btstack_cyw43
     pico_cyw43_arch_none
     boot_uf2_headers
+    pico_sha256
 )
 
-# Signed image (no TBYB): the RP2350 bootrom verifies the signature during
-# the OTA flash-update boot and commits it immediately. TBYB was removed:
-# its try/buy machinery re-ran the flash update on every reset and could
-# wedge the device in an invisible ROM retry loop.
+# OTA update scheme: the image keeps its picobin hash block (checked by
+# the bootrom at every boot), and the CI attaches a detached P-256 ECDSA
+# signature (picow-a2dp.sig) which the firmware verifies against
+# src/ota_pub_key.h before applying an update. The private key
+# (fw/ota_signing_key.pem) lives only in CI secrets.
 pico_hash_binary(${PROJECT_NAME})
-pico_sign_binary(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/signing_key.pem)
+
+# micro-ecc (linked via btstack) defaults to a 160-bit curve and compiles
+# its ECDSA code out unless asked. We need P-256 verification for OTA.
+# Only affects the unused LE secure pairing.
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    uECC_CURVE=uECC_secp256r1
+    uECC_ASM=uECC_asm_none
+    ENABLE_MICRO_ECC_ECDSA
+    ENABLE_MICO_ECC_ECDSA  # btstack's micro-ecc typo for the helper block
+)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR} # For btstack config
