@@ -133,7 +133,6 @@ export function useOta({ getDevice }) {
       let withoutResponse = true;
       let lastReported = 0;
       let ackTimeoutWarned = false;
-      let nextBoundary = FLASH_BLOCK;
       // TCP-like stop-and-wait flow control: the device notifies RECEIVING
       // after each 4 kB sector it erases+programs (~100-150 ms with
       // interrupts locked). Send one 4 kB block, then wait for its ACK
@@ -148,6 +147,7 @@ export function useOta({ getDevice }) {
         }
         return ackCount >= expected;
       };
+      let nextBoundary = FLASH_BLOCK;
       for (let off = 0, n = 0; off < blob.length; n++) {
         const part = blob.subarray(off, Math.min(off + chunk, blob.length));
         try {
