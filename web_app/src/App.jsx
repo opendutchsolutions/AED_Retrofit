@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useBLE } from './hooks/useBLE';
 import { useAudio } from './hooks/useAudio';
 import { useSimulation } from './hooks/useSimulation';
@@ -9,7 +9,7 @@ import { HardwarePanel } from './components/HardwarePanel';
 import { ManualPanel } from './components/ManualPanel';
 import { SessionLog } from './components/SessionLog';
 import { ScenarioEditor } from './components/ScenarioEditor';
-import { Card } from './components/UI';
+import { Card, Btn } from './components/UI';
 
 const SCREENS = [
   { key: 'verbinden',  label: 'Verbinden',  eyebrow: 'Stap 1' },
@@ -104,6 +104,17 @@ export default function App() {
   }
 
   const connected = ble.status === 'connected';
+
+  // Classic audio hint: shown after BLE connect until the classic audio link
+  // is up (bit0 = peer known, bit1 = classic connected — see fw gatt_service.c)
+  const [audioHintDismissed, setAudioHintDismissed] = useState(false);
+  useEffect(() => {
+    if (ble.status === 'connected') setAudioHintDismissed(false);
+  }, [ble.status]);
+
+  const classicOk = ble.classicStatus !== null && (ble.classicStatus & 0b11) === 0b11;
+  const classicPeerKnown = ble.classicStatus !== null && (ble.classicStatus & 1) !== 0;
+  const showAudioHint = connected && !audioHintDismissed && !classicOk;
 
   return (
     <>
@@ -263,6 +274,31 @@ export default function App() {
       <footer>
         <p>Copyright 2026 OpenDutchSolutions</p>
       </footer>
+
+      {showAudioHint && (
+        <div className="dialog-overlay" role="dialog" aria-modal="true" aria-labelledby="audio-hint-title">
+          <div className="card dialog-box">
+            <h2 id="audio-hint-title">Audioverbinding instellen</h2>
+            <p>
+              {classicPeerKnown
+                ? 'De oefen-AED is gekoppeld, maar de Bluetooth-audioverbinding is niet actief. Herstel die via de systeeminstellingen:'
+                : 'De gesproken instructies van de oefen-AED gaan via Bluetooth audio. Koppel het apparaat eenmalig via de systeeminstellingen:'}
+            </p>
+            <ol className="steps">
+              <li>Open <strong>Instellingen</strong> en tik op <strong>Bluetooth</strong>.</li>
+              <li>Zet Bluetooth aan als dat nog niet is gebeurd.</li>
+              <li>Zoek onder <strong>Mijn apparaten</strong> naar <strong>AED-Simulator-1</strong> en tik erop om te koppelen of te verbinden.</li>
+              <li>Keer terug naar deze web app; de verbinding komt daarna vanzelf tot stand.</li>
+            </ol>
+            <p className="hint">
+              Dit venster sluit automatisch zodra de oefen-AED de audioverbinding meldt.
+            </p>
+            <div className="button-row">
+              <Btn variant="primary" onClick={() => setAudioHintDismissed(true)}>Begrepen</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

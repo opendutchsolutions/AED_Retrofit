@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-const SVC   = '0000ff10-0000-1000-8000-00805f9b34fb';
-const CBTNS = '0000ff11-0000-1000-8000-00805f9b34fb';
-const CLEDS = '0000ff12-0000-1000-8000-00805f9b34fb';
+const SVC     = '0000ff10-0000-1000-8000-00805f9b34fb';
+const CBTNS   = '0000ff11-0000-1000-8000-00805f9b34fb';
+const CLEDS   = '0000ff12-0000-1000-8000-00805f9b34fb';
+const CSTATUS = '0000ff13-0000-1000-8000-00805f9b34fb';
 
 export const LED_BITS = { shock:0, on_off:1, info:2, hands_off:3, low_belly:4, breast:5, buzzer:6 };
 export const BTN_BITS = { shock:0, on_off:1, info:2, card_slot:3, pads_inserted:4 };
@@ -12,6 +13,7 @@ export function useBLE({ onButtonChange } = {}) {
   const [deviceName, setDeviceName] = useState(null);
   const [ledMask, setLedMaskState] = useState(0);
   const [btnMask, setBtnMask]   = useState(0);
+  const [classicStatus, setClassicStatus] = useState(null); // bit0=peer known, bit1=classic connected
   const [log, setLog]           = useState([]);
   const [knownDevices, setKnownDevices] = useState([]);
   const [available, setAvailable] = useState(null); // null = unknown/unsupported
@@ -19,6 +21,7 @@ export function useBLE({ onButtonChange } = {}) {
   const deviceRef  = useRef(null);
   const charBtns   = useRef(null);
   const charLeds   = useRef(null);
+  const charStatus = useRef(null);
   const ledMaskRef = useRef(0);
   const pollTimer  = useRef(null);
   const onBtnRef   = useRef(onButtonChange);
@@ -33,6 +36,10 @@ export function useBLE({ onButtonChange } = {}) {
     const val = e.target.value.getUint8(0);
     setBtnMask(val);
     onBtnRef.current?.(val);
+  }, []);
+
+  const onStatusNotify = useCallback((e) => {
+    setClassicStatus(e.target.value.getUint8(0));
   }, []);
 
   const startPoll = useCallback(() => {
@@ -55,8 +62,10 @@ export function useBLE({ onButtonChange } = {}) {
     setStatus('disconnected');
     setDeviceName(null);
     setBtnMask(0);
+    setClassicStatus(null);
     charBtns.current = null;
     charLeds.current = null;
+    charStatus.current = null;
     deviceRef.current = null;
     addLog('Disconnected', 'err');
   }, [stopPoll, addLog]);
@@ -83,7 +92,19 @@ export function useBLE({ onButtonChange } = {}) {
     setStatus('connected');
     setDeviceName(dev.name || 'AED');
     addLog(`Connected — ${dev.name || 'AED'}`, 'ok');
-  }, [onNotify, startPoll, addLog]);
+
+    // Classic audio status (0xFF13) — read once, then follow notifications.
+    // Optional so older firmware without this characteristic still connects.
+    try {
+      charStatus.current = await service.getCharacteristic(CSTATUS);
+      const initStatus = await charStatus.current.readValue();
+      setClassicStatus(initStatus.getUint8(0));
+      charStatus.current.addEventListener('characteristicvaluechanged', onStatusNotify);
+      await charStatus.current.startNotifications();
+    } catch (_) {
+      setClassicStatus(null);
+    }
+  }, [onNotify, onStatusNotify, startPoll, addLog]);
 
   const connect = useCallback(async () => {
     if (!navigator.bluetooth) { addLog('Web Bluetooth not available', 'err'); return; }
@@ -188,7 +209,7 @@ export function useBLE({ onButtonChange } = {}) {
   }, []);
 
   return {
-    status, deviceName, ledMask, btnMask, log, knownDevices, available,
+    status, deviceName, ledMask, btnMask, log, knownDevices, available, classicStatus,
     connect, disconnect, reconnect,
     setLed, setLedMask, allLedsOff, writeLeds,
     simulateButton, addLog,
