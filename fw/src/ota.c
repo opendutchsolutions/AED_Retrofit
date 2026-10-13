@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "boot/picoboot.h"
+#include "bt.h"
 #include "kvstore.h"
 #include "ota_pub_key.h"
 
@@ -142,6 +143,7 @@ static void set_error(ota_error_t err) {
   _received = 0;
   _buf_fill = 0;
   _have_signature = false;
+  bt_set_classic_suspended(false); // failed update: back to normal operation
   notify_status();
 }
 
@@ -349,6 +351,9 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _have_signature = false;
     _error = OTA_ERR_NONE;
     _state = OTA_RECEIVING;
+    // The A2DP stream and the BLE transfer share one radio — suspend the
+    // classic link for the duration of the update or the BLE link drops
+    bt_set_classic_suspended(true);
     printf("[ota] start: %u image + 64 sig bytes, crc 0x%08x\n", img_size, total_crc);
     notify_status();
     break;
@@ -362,6 +367,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _received = 0;
     _buf_fill = 0;
     _have_signature = false;
+    bt_set_classic_suspended(false);
     notify_status();
     break;
   case 0x04: // SIGNATURE — deprecated, signature now rides the data stream

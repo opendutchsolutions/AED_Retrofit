@@ -83,6 +83,15 @@ void bt_addr(bd_addr_t local_addr);
 void bt_reconnect_classic(void);
 
 /**
+ * @brief Suspend the classic audio link during a firmware update
+ *
+ * Drops any active A2DP connection and blocks automatic reconnection
+ * until resumed; the BLE OTA transfer and the classic audio stream share
+ * one radio and would otherwise starve the BLE connection.
+ */
+void bt_set_classic_suspended(bool suspend);
+
+/**
  * @brief Checks whether a Classic (BR/EDR) connection is currently active
  * @return Returns true when a Classic connection is up
  */

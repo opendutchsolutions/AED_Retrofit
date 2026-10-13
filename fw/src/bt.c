@@ -64,6 +64,9 @@ static btstack_packet_callback_registration_t _hci_registration;
 static volatile uint16_t _classic_con_handle = HCI_CON_HANDLE_INVALID;
 static bool _classic_peer_known = false;
 static bool _reconnect_pending = false;
+// Set while an OTA firmware update is in progress: the A2DP stream and the
+// BLE transfer share one radio, and both at once starve the BLE connection
+static bool _classic_suspended = false;
 
 static void update_classic_status(void) {
   uint8_t status = _classic_peer_known ? CLASSIC_STATUS_PEER_KNOWN : 0;
@@ -245,6 +248,8 @@ void bt_run(void) {
 void bt_reconnect_classic(void) {
   if (!_is_up || _reconnect_pending)
     return;
+  if (_classic_suspended)
+    return; // OTA update in progress — classic link stays down
   if (_classic_con_handle != HCI_CON_HANDLE_INVALID)
     return; // Classic link already up
 
@@ -262,6 +267,14 @@ void bt_reconnect_classic(void) {
   printf("[bt] classic audio reconnect to %s -> status=0x%02x\n",
          bd_addr_to_str(peer), status);
   _reconnect_pending = (status == ERROR_CODE_SUCCESS);
+}
+
+void bt_set_classic_suspended(bool suspend) {
+  _classic_suspended = suspend;
+  if (suspend && _classic_con_handle != HCI_CON_HANDLE_INVALID) {
+    printf("[bt] classic link suspended for firmware update\n");
+    gap_disconnect(_classic_con_handle);
+  }
 }
 
 bool bt_classic_connected(void) {
