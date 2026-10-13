@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Btn } from './UI';
 import { parseUf2, useOta } from '../hooks/useOta';
-import { FIRMWARE_URL, SIGNATURE_URL, isNewer, fetchServerVersion } from '../firmware';
+import { FIRMWARE_URL, SIGNATURE_URL, isNewer, fetchServerVersion, fetchFirmwareArtifact } from '../firmware';
 
 function classicText(classicStatus) {
   if (classicStatus === null) return 'Onbekend';
@@ -29,7 +29,7 @@ export function DeviceSummary({ deviceName, classicStatus, fwVersion, getDevice 
     setStatus('Nieuwste firmware ophalen…');
     try {
       const [fwResp, sigResp] = await Promise.all([
-        fetch(FIRMWARE_URL), fetch(SIGNATURE_URL),
+        fetchFirmwareArtifact(FIRMWARE_URL), fetchFirmwareArtifact(SIGNATURE_URL),
       ]);
       if (!fwResp.ok) throw new Error(`firmware niet gevonden (HTTP ${fwResp.status})`);
       if (!sigResp.ok) throw new Error(`handtekening niet gevonden (HTTP ${sigResp.status})`);

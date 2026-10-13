@@ -18,14 +18,23 @@ export function isNewer(a, b) {
   return false;
 }
 
-// Fetch the firmware version published by CI; null when unavailable
+// Fetch the firmware version published by CI; null when unavailable.
+// Cache-busted: GitHub Pages serves static files with a 10-minute cache,
+// which would otherwise hide a freshly deployed release.
 export async function fetchServerVersion() {
   try {
-    const r = await fetch(VERSION_URL);
+    const r = await fetch(`${VERSION_URL}?cb=${Date.now()}`);
     if (!r.ok) return null;
     const j = await r.json();
     return j?.version ?? null;
   } catch {
     return null;
   }
+}
+
+// Fetch a firmware artifact (uf2 or sig), bypassing the browser cache
+export async function fetchFirmwareArtifact(url) {
+  const r = await fetch(`${url}?cb=${Date.now()}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r;
 }

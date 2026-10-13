@@ -101,14 +101,28 @@ export function useOta({ getDevice }) {
       }
       blob.set(sig, bytes.length);
       let chunk = 240;
+      let withoutResponse = true;
       for (let off = 0, n = 0; off < blob.length; n++) {
         const part = blob.subarray(off, Math.min(off + chunk, blob.length));
         try {
-          await data.writeValueWithoutResponse(part);
+          if (withoutResponse) {
+            await data.writeValueWithoutResponse(part);
+          } else {
+            await data.writeValue(part);
+          }
         } catch (err) {
-          if (chunk > 20 && /length|mtu/i.test(err?.message || '')) {
-            chunk = 20; // MTU too small for the big chunks
-            continue;
+          const msg = String(err?.message ?? err);
+          // Some iOS Web Bluetooth implementations don't support
+          // writeValueWithoutResponse — fall back to writeValue.
+          if (withoutResponse && /support/i.test(msg)) {
+            withoutResponse = false;
+            continue; // retry the same offset
+          }
+          // The negotiated ATT MTU varies per platform (iOS ~185, no API
+          // to query it). Shrink the chunk until the write is accepted.
+          if (chunk > 20) {
+            chunk = chunk > 128 ? 128 : (chunk > 64 ? 64 : 20);
+            continue; // write failed → retry the same offset
           }
           throw err;
         }
