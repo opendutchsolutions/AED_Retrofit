@@ -4,6 +4,7 @@ import { parseUf2, useOta } from '../hooks/useOta';
 
 // Served by the firmware workflow (fw → web_app/public/firmware)
 const FIRMWARE_URL = `${import.meta.env.BASE_URL}firmware/picow-a2dp.uf2`;
+const SIGNATURE_URL = `${import.meta.env.BASE_URL}firmware/picow-a2dp.sig`;
 
 function classicText(classicStatus) {
   if (classicStatus === null) return 'Onbekend';
@@ -22,13 +23,16 @@ export function DeviceSummary({ deviceName, classicStatus, getDevice }) {
     setFetching(true);
     setStatus('Nieuwste firmware ophalen…');
     try {
-      const resp = await fetch(FIRMWARE_URL);
-      if (!resp.ok) throw new Error(`firmware niet gevonden (HTTP ${resp.status})`);
-      const buf = await resp.arrayBuffer();
-      const bytes = parseUf2(buf);
-      await run(bytes);
+      const [fwResp, sigResp] = await Promise.all([
+        fetch(FIRMWARE_URL), fetch(SIGNATURE_URL),
+      ]);
+      if (!fwResp.ok) throw new Error(`firmware niet gevonden (HTTP ${fwResp.status})`);
+      if (!sigResp.ok) throw new Error(`handtekening niet gevonden (HTTP ${sigResp.status})`);
+      const bytes = parseUf2(await fwResp.arrayBuffer());
+      const sig = new Uint8Array(await sigResp.arrayBuffer());
+      await run(bytes, sig);
     } catch (e) {
-      setStatus(`Update mislukt: ${e.message}`);
+      setStatus(`Update mislukt: ${e?.message || e}`);
     } finally {
       setFetching(false);
     }
@@ -72,8 +76,9 @@ export function DeviceSummary({ deviceName, classicStatus, getDevice }) {
         <p className="message" role="status" style={{ marginBottom: 0 }}>{status}</p>
       )}
       <p className="hint">
-        De nieuwste firmware wordt opgehaald van de server en draadloos naar de
-        oefen-AED gestuurd. Het apparaat start na afloop zelf opnieuw op.
+        De nieuwste, ondertekende firmware wordt opgehaald van de server en
+        draadloos naar de oefen-AED gestuurd. Het apparaat controleert de
+        handtekening en start daarna zelf opnieuw op.
       </p>
     </Card>
   );

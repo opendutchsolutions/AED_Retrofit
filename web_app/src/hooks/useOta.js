@@ -53,16 +53,16 @@ export function parseUf2(buf) {
 }
 
 /**
- * Streams a raw firmware image to the device's OTA service (GATT 0xFF20).
- * `bytes` is the raw image (use parseUf2 for .uf2 files).
- * The device verifies the CRC and reboots into the new firmware.
+ * Streams a raw firmware image + its P-256 ECDSA signature (raw r||s,
+ * 64 bytes) to the device's OTA service (GATT 0xFF20). The device
+ * verifies both and reboots to apply the update.
  */
 export function useOta({ getDevice }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [progress, setProgress] = useState(null);
 
-  const run = useCallback(async (bytes, { label = 'Overbrengen' } = {}) => {
+  const run = useCallback(async (bytes, sig, { label = 'Overbrengen' } = {}) => {
     setBusy(true);
     setProgress(0);
     setStatus('Verbinden met de update-service…');
@@ -108,7 +108,17 @@ export function useOta({ getDevice }) {
         if (n % 16 === 0) await sleep(15);
       }
 
-      // FINISH [0x02] — device verifies CRC and reboots when OK
+      // SIGNATURE [0x04][raw r||s : 64] — the device verifies it against
+      // its compiled-in public key before applying the update
+      if (!sig || sig.length !== 64) {
+        throw new Error('geen geldige handtekening (64 bytes vereist)');
+      }
+      const signCmd = new Uint8Array(65);
+      signCmd[0] = 0x04;
+      signCmd.set(sig, 1);
+      await ctrl.writeValue(signCmd);
+
+      // FINISH [0x02] — device verifies CRC + signature, then reboots
       setStatus('Controleren…');
       await ctrl.writeValue(new Uint8Array([0x02]));
 
@@ -122,7 +132,7 @@ export function useOta({ getDevice }) {
       setStatus('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.');
       return true;
     } catch (e) {
-      setStatus(`Update mislukt: ${e.message}`);
+      setStatus(`Update mislukt: ${e?.message || e}`);
       return false;
     } finally {
       setBusy(false);
