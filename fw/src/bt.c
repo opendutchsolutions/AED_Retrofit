@@ -161,7 +161,16 @@ static void packet_handler(uint8_t packet_type, uint16_t channel,
     break;
 
   case HCI_EVENT_CONNECTION_REQUEST:
-    printf("[bt] Classic connection request\n");
+    hci_event_connection_request_get_bd_addr(packet, address);
+    if (_classic_suspended) {
+      // The phone may auto-reconnect classic audio right after the update
+      // dropped the link — reject it until the update finishes
+      printf("[bt] rejecting classic connection during firmware update\n");
+      hci_send_cmd(&hci_reject_connection_request, address,
+                   ERROR_CODE_CONNECTION_REJECTED_DUE_TO_LIMITED_RESOURCES);
+    } else {
+      printf("[bt] Classic connection request\n");
+    }
     break;
 
   case HCI_EVENT_CONNECTION_COMPLETE: {

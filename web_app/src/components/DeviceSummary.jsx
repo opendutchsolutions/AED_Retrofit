@@ -13,8 +13,8 @@ function classicText(classicStatus) {
   return 'Niet gekoppeld';
 }
 
-export function DeviceSummary({ deviceName, classicStatus, fwVersion, getDevice }) {
-  const { busy, status, progress, run, setStatus, log, addLog } = useOta({ getDevice });
+export function DeviceSummary({ deviceName, classicStatus, fwVersion, getDevice, setOtaActive }) {
+  const { busy, status, progress, run, setStatus, log, addLog } = useOta({ getDevice, setOtaActive });
   const [fetching, setFetching] = useState(false);
   const [serverVersion, setServerVersion] = useState(null);
 
@@ -78,7 +78,8 @@ export function DeviceSummary({ deviceName, classicStatus, fwVersion, getDevice 
           <p className="hint">
             De nieuwste, ondertekende firmware wordt opgehaald van de server en
             draadloos naar de oefen-AED gestuurd. Het apparaat controleert de
-            handtekening en start daarna zelf opnieuw op.
+            handtekening en start daarna zelf opnieuw op. Tijdens de update
+            worden alle andere Bluetooth-activiteiten gepauzeerd.
           </p>
         </>
       ) : (

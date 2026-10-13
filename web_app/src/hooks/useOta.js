@@ -57,7 +57,7 @@ export function parseUf2(buf) {
  * 64 bytes) to the device's OTA service (GATT 0xFF20). The device
  * verifies both and reboots to apply the update.
  */
-export function useOta({ getDevice }) {
+export function useOta({ getDevice, setOtaActive }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [progress, setProgress] = useState(null);
@@ -77,7 +77,23 @@ export function useOta({ getDevice }) {
     addLog(`Update gestart (${label.toLowerCase()}, ${bytes.length} bytes)`);
     try {
       const dev = getDevice();
-      if (!dev?.gatt?.connected) throw new Error('niet verbonden met de oefen-AED');
+      if (!dev?.gatt) throw new Error('niet verbonden met de oefen-AED');
+
+      // Pause all other BLE traffic from this app for the duration
+      setOtaActive?.(true);
+
+      // Reconnect if the link dropped, then let it settle: right after a
+      // (re)connect the phone is still doing GATT discovery, MTU exchange
+      // and the device may just have started its classic-audio restore.
+      if (!dev.gatt.connected) {
+        addLog('Opnieuw verbinden met de oefen-AED…');
+        await dev.gatt.connect();
+        await sleep(1000);
+      }
+      addLog('Wachten tot de Bluetooth-verbinding stabiel is…');
+      await sleep(2000);
+
+      if (!dev.gatt.connected) throw new Error('verbinding verbroken tijdens de voorbereiding');
       addLog(`Apparaat: ${dev.name || 'onbekend'}, GATT verbonden`);
 
       addLog('OTA-service opzoeken (0xFF20)…');
@@ -254,9 +270,10 @@ export function useOta({ getDevice }) {
       setStatus(`Update mislukt: ${msg}`);
       return false;
     } finally {
+      setOtaActive?.(false);
       setBusy(false);
     }
-  }, [getDevice, addLog]);
+  }, [getDevice, addLog, setOtaActive]);
 
   return { busy, status, progress, run, setStatus, log, addLog };
 }

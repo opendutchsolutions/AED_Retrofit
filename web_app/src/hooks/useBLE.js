@@ -28,6 +28,8 @@ export function useBLE({ onButtonChange } = {}) {
   const charStatus = useRef(null);
   const ledMaskRef = useRef(0);
   const pollTimer  = useRef(null);
+  const otaLockRef = useRef(false); // true while an OTA update is running
+  const [otaActive, setOtaActiveState] = useState(false);
   const onBtnRef   = useRef(onButtonChange);
   useEffect(() => { onBtnRef.current = onButtonChange; }, [onButtonChange]);
 
@@ -49,6 +51,7 @@ export function useBLE({ onButtonChange } = {}) {
   const startPoll = useCallback(() => {
     if (pollTimer.current) return;
     pollTimer.current = setInterval(async () => {
+      if (otaLockRef.current) return; // no other traffic during an OTA update
       if (!charBtns.current || !deviceRef.current?.gatt.connected) return;
       try {
         const d = await charBtns.current.getDescriptor(0x2902);
@@ -192,11 +195,18 @@ export function useBLE({ onButtonChange } = {}) {
 
   const getDevice = useCallback(() => deviceRef.current, []);
 
+  // Set by useOta for the duration of a firmware update: all non-OTA BLE
+  // traffic from this app is paused so the transfer has the link to itself.
+  const setOtaActive = useCallback((active) => {
+    otaLockRef.current = active;
+    setOtaActiveState(active);
+  }, []);
+
   const writeLeds = useCallback(async (mask) => {
     const clamped = mask & 0x7f;  // 7 bits: 6 LEDs + buzzer
     ledMaskRef.current = clamped;
     setLedMaskState(clamped);     // always update UI, even without hardware
-    if (!charLeds.current) return;
+    if (!charLeds.current || otaLockRef.current) return; // no LED writes during OTA
     try {
       await charLeds.current.writeValueWithoutResponse(new Uint8Array([clamped]));
     } catch(e) {
@@ -228,8 +238,8 @@ export function useBLE({ onButtonChange } = {}) {
   }, []);
 
   return {
-    status, deviceName, ledMask, btnMask, log, knownDevices, available, classicStatus, fwVersion,
-    connect, disconnect, reconnect, getDevice,
+    status, deviceName, ledMask, btnMask, log, knownDevices, available, classicStatus, fwVersion, otaActive,
+    connect, disconnect, reconnect, getDevice, setOtaActive,
     setLed, setLedMask, allLedsOff, writeLeds,
     simulateButton, addLog,
   };

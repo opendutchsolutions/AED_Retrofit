@@ -4,8 +4,8 @@ import { LogField } from './LogField';
 import { parseUf2, useOta } from '../hooks/useOta';
 import { FIRMWARE_URL, SIGNATURE_URL, isNewer, fetchServerVersion, fetchFirmwareArtifact } from '../firmware';
 
-export function OtaPanel({ connected, fwVersion, getDevice }) {
-  const { busy, status, progress, run, setStatus, log, addLog } = useOta({ getDevice });
+export function OtaPanel({ connected, fwVersion, getDevice, setOtaActive }) {
+  const { busy, status, progress, run, setStatus, log, addLog } = useOta({ getDevice, setOtaActive });
   const [fetching, setFetching] = useState(false);
   const [serverVersion, setServerVersion] = useState(null);
 

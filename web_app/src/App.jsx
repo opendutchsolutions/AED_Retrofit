@@ -168,6 +168,7 @@ export default function App() {
                     classicStatus={ble.classicStatus}
                     fwVersion={ble.fwVersion}
                     getDevice={ble.getDevice}
+                    setOtaActive={ble.setOtaActive}
                   />
                 ) : (
                   <Card>
@@ -252,7 +253,7 @@ export default function App() {
                   ledMask={ble.ledMask}
                 />
                 <SessionLog entries={sim.sessionLog} onClear={sim.clearSessionLog} />
-                <OtaPanel connected={connected} fwVersion={ble.fwVersion} getDevice={ble.getDevice} />
+                <OtaPanel connected={connected} fwVersion={ble.fwVersion} getDevice={ble.getDevice} setOtaActive={ble.setOtaActive} />
               </div>
             </section>
           )}
