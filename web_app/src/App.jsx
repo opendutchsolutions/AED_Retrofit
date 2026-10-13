@@ -157,6 +157,7 @@ export default function App() {
                   knownDevices={ble.knownDevices}
                   onReconnect={ble.reconnect}
                   available={ble.available}
+                  error={ble.log.find(e => e.type === 'err')?.msg}
                 />
                 <Card>
                   <h2>Geen apparaat beschikbaar?</h2>
