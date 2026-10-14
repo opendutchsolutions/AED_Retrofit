@@ -1,39 +1,33 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-// Compression click track: 110/min per the reanimation guideline
-const CLICK_TRACK = 'audio/click-track-110bpm.mp3';
+// Single cropped beats, scheduled individually so the ratio is exact
+const CLICK_BEAT = 'audio/metronome_click.wav';      // one compression click
+const VENT_BEAT = 'audio/ventilation_beat.wav';      // one ventilation tone
+// Compression cadence: 110/min per the reanimation guideline
 const CLICK_BEAT_MS = 60000 / 110;
-// Ventilation guidance rhythm: one ventilation per second
-const VENT_TRACK = 'audio/ventilation_metronome.wav';
-const VENT_BEAT_MS = 1000;
+// Ventilation pace: one ventilation per ~1.4 s tone
+const VENT_BEAT_MS = 1400;
 
 /** ratio label -> { compressions, ventilations } */
 export const METRONOME_RATIOS = {
   '30:2': { compressions: 30, ventilations: 2 },
-  '15:1': { compressions: 15, ventilations: 1 },
+  '15:2': { compressions: 15, ventilations: 2 },
   '10:1': { compressions: 10, ventilations: 1 },
 };
 
 /**
- * CPR metronome: plays the compression click track for the ratio's
- * compression count, then the ventilation metronome for the ventilation
- * count, and repeats until stop() is called. During the ventilations the
- * click track is silent, so compressions and ventilations never overlap.
+ * CPR metronome built from single beats: each compression schedules one
+ * click at the 110/min cadence, each ventilation schedules one tone, and
+ * the selected ratio (compressions : ventilations) repeats until stop().
  */
 export function useMetronome() {
-  const clickRef = useRef(null);
-  const ventRef = useRef(null);
-  const timerRef = useRef(null);
+  const timersRef = useRef([]);
   const runningRef = useRef(false);
 
   const stop = useCallback(() => {
     runningRef.current = false;
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (clickRef.current) { clickRef.current.pause(); clickRef.current = null; }
-    if (ventRef.current) { ventRef.current.pause(); ventRef.current = null; }
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
   }, []);
 
   const start = useCallback((ratio) => {
@@ -42,32 +36,29 @@ export function useMetronome() {
     stop();
     runningRef.current = true;
 
-    const click = new Audio(CLICK_TRACK);
-    click.loop = true;
-    const vent = new Audio(VENT_TRACK);
-    vent.loop = true;
-    clickRef.current = click;
-    ventRef.current = vent;
-    vent.muted = true;
-    click.play().catch(() => {});
-    vent.play().catch(() => {});
-    // Both loops keep running; the scheduler only toggles which one is
-    // audible, so the click track stays on beat within each cycle.
+    // Prototypes are cloned per beat: cloning resets playback to the
+    // start without re-fetching the file.
+    const click = new Audio(CLICK_BEAT);
+    const vent = new Audio(VENT_BEAT);
+    const beat = (proto, delayMs) => {
+      timersRef.current.push(setTimeout(() => {
+        if (!runningRef.current) return;
+        const a = proto.cloneNode(true);
+        a.play().catch(() => {});
+      }, delayMs));
+    };
 
-    const compressMs = r.compressions * CLICK_BEAT_MS;
-    const ventMs = r.ventilations * VENT_BEAT_MS;
     const cycle = () => {
       if (!runningRef.current) return;
-      click.muted = false;
-      vent.muted = true;
-      vent.currentTime = 0;
-      timerRef.current = setTimeout(() => {
-        if (!runningRef.current) return;
-        click.muted = true;
-        vent.muted = false;
-        vent.currentTime = 0;
-        timerRef.current = setTimeout(cycle, ventMs);
-      }, compressMs);
+      for (let i = 0; i < r.compressions; i++) {
+        beat(click, i * CLICK_BEAT_MS);
+      }
+      const ventStart = r.compressions * CLICK_BEAT_MS + 50;
+      for (let j = 0; j < r.ventilations; j++) {
+        beat(vent, ventStart + j * VENT_BEAT_MS);
+      }
+      const cycleMs = ventStart + r.ventilations * VENT_BEAT_MS + 50;
+      timersRef.current.push(setTimeout(cycle, cycleMs));
     };
     cycle();
   }, [stop]);

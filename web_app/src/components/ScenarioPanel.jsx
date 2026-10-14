@@ -61,7 +61,7 @@ export function ScenarioPanel({
           >
             <option value="Uit">Uit</option>
             <option value="30:2">30:2 — volwassenen</option>
-            <option value="15:1">15:1</option>
+            <option value="15:2">15:2</option>
             <option value="10:1">10:1</option>
           </select>
           <p className="hint" style={{ marginBottom: 0 }}>
