@@ -23,10 +23,30 @@ export function useAudio() {
     }
   }, []);
 
+  // Pause the scenario audio without losing its position; returns true
+  // when there is a paused, resumable main track (so an overlay can
+  // restore it once it finishes).
+  const pauseMain = useCallback(() => {
+    const a = audioRef.current;
+    if (!a || a.ended) return false;
+    if (!a.paused) a.pause();
+    return true;
+  }, []);
+
+  // Resume the scenario audio from where pauseMain() stopped it. No-op
+  // when the main track was replaced or stopped in the meantime.
+  const resumeMain = useCallback(() => {
+    const a = audioRef.current;
+    if (a && a.paused && !a.ended) {
+      a.play().catch(() => {});
+    }
+  }, []);
+
   // Independent channel for announcements (e.g. kindsleutel activated):
-  // plays alongside the scenario prompt instead of replacing it.
+  // interrupts the scenario prompt and can restore it on completion via
+  // the optional onEnded callback.
   const overlayRef = useRef(null);
-  const playOverlay = useCallback((src) => {
+  const playOverlay = useCallback((src, onEnded) => {
     if (!src) return;
     if (overlayRef.current) {
       overlayRef.current.pause();
@@ -34,6 +54,11 @@ export function useAudio() {
     }
     const a = new Audio(src);
     overlayRef.current = a;
+    if (onEnded) {
+      a.addEventListener('ended', () => {
+        if (overlayRef.current === a) onEnded();
+      }, { once: true });
+    }
     a.play().catch(() => {});
     return a;
   }, []);
@@ -44,5 +69,5 @@ export function useAudio() {
     }
   }, []);
 
-  return { play, stop, playOverlay, stopOverlay };
+  return { play, stop, pauseMain, resumeMain, playOverlay, stopOverlay };
 }

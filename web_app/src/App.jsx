@@ -83,7 +83,7 @@ function DeviceStatusCard({ status, deviceName, running, ledMask }) {
 
 export default function App() {
   const [screen, setScreen] = useState('verbinden');
-  const { play: playAudio, stop: stopAudio, playOverlay } = useAudio();
+  const { play: playAudio, stop: stopAudio, pauseMain, resumeMain, playOverlay } = useAudio();
 
   // Forward ref so BLE hook can call into sim without circular dependency
   const simRef = useRef(null);
@@ -91,8 +91,8 @@ export default function App() {
 
   // Kindsleutel-check: an additional, non-blocking check anywhere in the
   // first three steps (warning / place_pads / analyse). When the child
-  // key is inserted, its announcement plays alongside the scenario —
-  // the scenario flow itself is not affected.
+  // key is inserted, its announcement interrupts the scenario prompt and
+  // the prompt resumes where it left off once the announcement ends.
   const handleButtonChange = useCallback((mask) => {
     const CARD_BIT = 3; // card_slot / kindsleutel
     const wasInserted = (prevBtnMaskRef.current >> CARD_BIT) & 1;
@@ -108,12 +108,15 @@ export default function App() {
         const src = bank.kindsleutel?.url
           || map.kindsleutel
           || AUDIO_FILES.Nederlands.kindsleutel;
-        playOverlay(src);
+        const mainWasPlaying = pauseMain();
+        playOverlay(src, () => {
+          if (mainWasPlaying) resumeMain();
+        });
         sim?.logSession && sim.logSession('Kindsleutel geactiveerd — melding afgespeeld', 'ok');
       }
     }
     simRef.current?.handleButton(mask);
-  }, [playOverlay]);
+  }, [playOverlay, pauseMain, resumeMain]);
 
   const ble = useBLE({ onButtonChange: handleButtonChange });
 
