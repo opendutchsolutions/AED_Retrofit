@@ -108,6 +108,12 @@ static void serial_timer_cb(btstack_timer_source_t *ts) {
         } else if (strncmp(_cmd_buf, "pcmtest ", 8) == 0 &&
                    (n = parse_num(_cmd_buf + 8)) > 0) {
           a2dp_pcm_analyze_start(n);
+        } else if (strncmp(_cmd_buf, "stagecrc ", 9) == 0 &&
+                   (n = parse_num(_cmd_buf + 9)) > 0) {
+          ota_staging_crc(n);
+        } else if (strncmp(_cmd_buf, "stagedump ", 10) == 0 &&
+                   (n = parse_num(_cmd_buf + 10)) >= 0) {
+          ota_staging_dump(n);
         } else if (strcmp(_cmd_buf, "pcmreport") == 0) {
           a2dp_pcm_analyze_report();
         } else {

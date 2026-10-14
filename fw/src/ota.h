@@ -39,6 +39,8 @@ void ota_apply_check_and_run(void);
  *        BLE update, then read back and compare. Prints PASS/FAIL.
  */
 void ota_selftest(uint32_t size);
+void ota_staging_crc(uint32_t size);
+void ota_staging_dump(uint32_t offset);
 
 /**
  * @brief Serial self-test: write the apply record for the staged image

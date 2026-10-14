@@ -88,6 +88,7 @@ static uint32_t _buf_fill = 0;
 static uint32_t _sector_count = 0;
 static bool _dry_run = false; // START flag bit0: count only, no flash
 static uint32_t _staged_crc = 0; // image crc of the current/last transfer
+static uint32_t _stage_check_crc = 0; // on-demand staging checksum (cmd 0x05)
 static uint8_t _sector_buf[FLASH_SECTOR_SIZE_4K];
 static uint8_t _signature[64];
 static bool _have_signature = false;
@@ -115,7 +116,7 @@ static uint32_t crc32(const uint8_t *data, uint32_t len) {
   return ~crc;
 }
 
-#define OTA_STATUS_LEN 10
+#define OTA_STATUS_LEN 14
 static void status_bytes(uint8_t *out) {
   out[0] = (uint8_t)_state;
   out[1] = _received & 0xFF;
@@ -127,6 +128,10 @@ static void status_bytes(uint8_t *out) {
   out[7] = (_staged_crc >> 8) & 0xFF;
   out[8] = (_staged_crc >> 16) & 0xFF;
   out[9] = (_staged_crc >> 24) & 0xFF;
+  out[10] = _stage_check_crc & 0xFF;
+  out[11] = (_stage_check_crc >> 8) & 0xFF;
+  out[12] = (_stage_check_crc >> 16) & 0xFF;
+  out[13] = (_stage_check_crc >> 24) & 0xFF;
 }
 
 static void do_status_notify(void *context) {
@@ -381,6 +386,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _image_size = img_size;
     _image_crc = total_crc; // CRC covers image bytes only (0..img_size)
     _staged_crc = total_crc; // resume state survives disconnects
+    _stage_check_crc = 0;
     _received = resume_off;
     _buf_fill = 0;
     _sector_count = resume_off / FLASH_SECTOR_SIZE_4K;
@@ -409,6 +415,21 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     break;
   case 0x04: // SIGNATURE — deprecated, signature now rides the data stream
     break;
+  case 0x05: { // STAGE-CHECK [offset:u32] -> crc32(staging[0..offset)),
+              // readable via the ctrl characteristic (bytes 10..13)
+    if (size < 5) {
+      return;
+    }
+    uint32_t off = little_endian_read_32(buffer, 1);
+    if (off > OTA_STAGING_SIZE) {
+      _stage_check_crc = 0;
+      return;
+    }
+    _stage_check_crc = off ? crc32((const uint8_t *)OTA_STAGING_BASE, off) : 0;
+    printf("[ota] stage-check %u kB -> 0x%08x\n", off / 1024,
+           _stage_check_crc);
+    break;
+  }
   default:
     break;
   }
@@ -523,6 +544,35 @@ void ota_init(void) {
 
   printf("[ota] service ready (ctrl=%d data=%d, staging 0x%08x)\n",
          _handle_ctrl_value, _handle_data_value, OTA_STAGING_BASE);
+}
+
+void ota_staging_dump(uint32_t offset) {
+  if (offset >= OTA_STAGING_SIZE) {
+    printf("[ota] stagedump: invalid offset %u\n", offset);
+    return;
+  }
+  printf("[ota] stagedump @%u:", offset);
+  const uint8_t *p = (const uint8_t *)OTA_STAGING_BASE + offset;
+  for (int i = 0; i < 32; i++) {
+    printf(" %02x", p[i]);
+  }
+  printf("\n");
+}
+
+void ota_staging_crc(uint32_t size) {
+  if (size == 0 || size > OTA_STAGING_SIZE) {
+    printf("[ota] stagecrc: invalid size %u\n", size);
+    return;
+  }
+  uint32_t crc = crc32((const uint8_t *)OTA_STAGING_BASE, size);
+  printf("[ota] stagecrc: %u bytes -> 0x%08x\n", size, crc);
+  // per-64 kB chunks to locate corruption
+  for (uint32_t off = 0; off < size; off += 65536u) {
+    uint32_t n = size - off;
+    if (n > 65536u) n = 65536u;
+    printf("[ota] stagecrc %3u kB: 0x%08x\n", off / 1024,
+           crc32((const uint8_t *)OTA_STAGING_BASE + off, n));
+  }
 }
 
 void ota_selftest(uint32_t size) {

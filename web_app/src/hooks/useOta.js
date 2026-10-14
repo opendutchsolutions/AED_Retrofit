@@ -130,7 +130,21 @@ export function useOta({ getDevice, setOtaActive }) {
           received: v.getUint32(1, true),
           error: v.getUint8(5),
           stagedCrc: v.byteLength >= 10 ? v.getUint32(6, true) : null,
+          stageCheck: v.byteLength >= 14 ? v.getUint32(10, true) : null,
         };
+      };
+      // Ask the device for crc32(staging[0..offset)) and return it.
+      // Content verification: byte-count polls cannot detect packets that
+      // were silently dropped by the radio (write-without-response has no
+      // per-packet ACK), which corrupted earlier transfers.
+      const stagingCrc = async (ctrl, offset) => {
+        const cmd = new Uint8Array(5);
+        const dv = new DataView(cmd.buffer);
+        cmd[0] = 0x05;
+        dv.setUint32(1, offset, true);
+        await withTimeout(ctrl.writeValue(cmd), 'controle-som opvragen');
+        const st = await readCtrl(ctrl);
+        return st.stageCheck;
       };
 
       // Image + signature as one continuous blob
@@ -144,6 +158,7 @@ export function useOta({ getDevice, setOtaActive }) {
 
       let chunk = 0;
       let confirmed = 0; // device-confirmed bytes (4 kB aligned)
+      let verified = 0;  // content-verified bytes (staging CRC matched)
       let round = 0;
       let ctrl = null;
 
@@ -244,6 +259,20 @@ export function useOta({ getDevice, setOtaActive }) {
                 await sleep(60);
               }
               confirmed = Math.max(confirmed, sectorEnd);
+              // Content verification every 16 sectors (64 kB): packets
+              // can vanish silently; byte counts cannot see it, CRCs can.
+              if (sectorEnd % (FLASH_BLOCK * 16) === 0) {
+                const want = crc32(blob.subarray(0, sectorEnd));
+                const got = await stagingCrc(ctrl, sectorEnd);
+                if (got !== want) {
+                  throw new Error(
+                    `controle-som mismatch bij ${Math.round(sectorEnd / 1024)} kB ` +
+                    `(apparaat 0x${(got ?? 0).toString(16)} != 0x${want.toString(16)}) — ` +
+                    `herstellen vanaf ${Math.round(verified / 1024)} kB`);
+                }
+                verified = sectorEnd;
+                addLog(`Controle-som ok t/m ${Math.round(sectorEnd / 1024)} kB`);
+              }
             }
             if (off - lastReported >= blob.length / 10 || off === blob.length) {
               lastReported = off;
@@ -257,11 +286,25 @@ export function useOta({ getDevice, setOtaActive }) {
           if (/apparaatfout/.test(String(msg))) {
             throw roundErr; // device reported a protocol error — do not retry
           }
+          // Roll back to the last content-verified boundary: bytes past it
+          // may be silently corrupted and the resume must overwrite them.
+          confirmed = verified;
           await sleep(1500);
         }
       }
       if (confirmed < blob.length) {
         throw new Error(`overdracht niet voltooid na ${round} ronden (${confirmed} bytes)`);
+      }
+      // Final gate: verify the full staged image before FINISH
+      {
+        const want = crc32(blob.subarray(0, bytes.length));
+        const got = await stagingCrc(ctrl, bytes.length);
+        if (got !== want) {
+          throw new Error(
+            `staging-corruptie gedetecteerd vóór afronding ` +
+            `(apparaat 0x${(got ?? 0).toString(16)} != 0x${want.toString(16)})`);
+        }
+        addLog('Staging volledig geverifieerd (controle-som klopt)');
       }
       addLog(`Alle ${blob.length} bytes overgebracht in ${round} ronde(s) [${elapsed()}]`);
 
