@@ -97,7 +97,7 @@ export function OtaPanel({ connected, fwVersion, getDevice, setOtaActive }) {
       {status && (
         <p className="message" role="status" style={{ marginBottom: 0 }}>{status}</p>
       )}
-      {(updateAvailable || !versionKnown) && (
+      {updateAvailable && (
         <div style={{ marginTop: '.8rem' }}>
           <button
             type="button"
