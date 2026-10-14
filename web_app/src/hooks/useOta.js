@@ -96,131 +96,142 @@ export function useOta({ getDevice, setOtaActive }) {
       if (!dev.gatt.connected) throw new Error('verbinding verbroken tijdens de voorbereiding');
       addLog(`Apparaat: ${dev.name || 'onbekend'}, GATT verbonden`);
 
-      addLog('OTA-service opzoeken (0xFF20)…');
-      let svc, ctrl, data;
-      try {
-        svc  = await dev.gatt.getPrimaryService(SVC_UUID);
-        ctrl = await svc.getCharacteristic(CTRL_UUID);
-        data = await svc.getCharacteristic(DATA_UUID);
-      } catch (e) {
-        addLog(`Service of kenmerk niet gevonden: ${e?.message || e}`, 'err');
-        addLog('Tips: (1) zet Bluetooth op het iPhone/iPad kort uit en weer aan — iOS cachet de lijst met Bluetooth-services van dit apparaat en ziet zo nieuwe services pas na een cache-verversing; (2) verbind daarna opnieuw via de apparaatkeuze (Verbinden), niet via een opgeslagen verbinding.', 'warn');
-        throw e;
-      }
-      addLog('Start- (0xFF21) en data-kenmerk (0xFF22) gevonden');
-
+      // Resumable transfer: the iOS BLE transport drops or wedges a
+      // variable way into a large transfer (supervision timeouts, hung
+      // shims). Each round (re)connects, STARTs at the last device-
+      // confirmed 4 kB boundary and streams as far as it gets; the
+      // device keeps already-staged sectors. Repeat until complete.
       let finalState = null;
-      let ackCount = 0; // RECEIVING notifications: START ack + one per flushed sector
       const stateName = { 1: 'ontvangst bevestigd', 2: 'controle CRC + handtekening', 3: 'gereed', 4: 'fout' };
       const onNotify = (e) => {
         const s = e.target.value.getUint8(0);
-        if (s === OTA_STATE.RECEIVING) {
-          ackCount++;
-          if (ackCount === 1) addLog('Apparaat bevestigt START (melding ontvangen)');
-          return; // per-sector ACKs are counted, not logged
+        if (s !== OTA_STATE.RECEIVING) {
+          addLog(`Apparaatstatus: ${stateName[s] || s}`, s === OTA_STATE.ERROR ? 'err' : s === OTA_STATE.READY ? 'ok' : 'info');
+          if (s === OTA_STATE.READY || s === OTA_STATE.ERROR) finalState = s;
         }
-        addLog(`Apparaatstatus: ${stateName[s] || s}`, s === OTA_STATE.ERROR ? 'err' : s === OTA_STATE.READY ? 'ok' : 'info');
-        if (s === OTA_STATE.READY || s === OTA_STATE.ERROR) finalState = s;
       };
-      ctrl.addEventListener('characteristicvaluechanged', onNotify);
-      await ctrl.startNotifications();
-      addLog('Meldingen geactiveerd op 0xFF21');
 
-      // Probe the usable ATT payload like BLEOTA does: try
-      // writeValueWithoutResponse with decreasing candidate sizes — it
-      // fails fast where a too-large writeValue would hang the iOS shim.
-      // Runs before START so the device ignores the probe writes.
-      let chunk = 0;
-      for (const candidate of [244, 180, 128, 64, 20]) {
-        try {
-          await data.writeValueWithoutResponse(new Uint8Array(candidate));
-          chunk = candidate;
-          break;
-        } catch (_) { /* try the next smaller size */ }
-      }
-      if (!chunk) chunk = 20;
-      addLog(`MTU-probe: ${chunk} bytes per schrijfactie`);
-
-      // START [0x01][total_size:u32][crc32:u32][image_size:u32][flags:u32]
-      // total = image + 64-byte signature appended; crc covers image only;
-      // flags bit0 = dry run (device counts bytes but writes no flash)
-      const dryRun = new URLSearchParams(location.search).get('otaDryRun') === '1';
-      const cmd = new Uint8Array(dryRun ? 17 : 13);
-      const cmdDv = new DataView(cmd.buffer);
-      const imageCrc = crc32(bytes);
-      cmd[0] = 0x01;
-      cmdDv.setUint32(1, bytes.length + 64, true);   // total
-      cmdDv.setUint32(5, imageCrc, true);            // crc of image bytes
-      cmdDv.setUint32(9, bytes.length, true);        // image size
-      if (dryRun) cmdDv.setUint32(13, 1, true);     // dry-run flag
-      await ctrl.writeValue(cmd);
-      addLog(`START verstuurd${dryRun ? ' (DRY RUN — geen flash)' : ''}: ${bytes.length} + 64 bytes, crc 0x${imageCrc.toString(16).padStart(8, '0')} [${elapsed()}]`);
-
-      setStatus(`${label} (${Math.ceil(bytes.length / 1024)} kB)…`);
-      // Stream image + signature as one continuous blob
-      const blob = new Uint8Array(bytes.length + 64);
-      blob.set(bytes, 0);
-      if (!sig || sig.length !== 64) {
-        throw new Error('geen geldige handtekening (64 bytes vereist)');
-      }
-      blob.set(sig, bytes.length);
-      let lastReported = 0;
-      // BLEOTA-style per-sector stop-and-wait, with the progress signal
-      // POLLED instead of notification-based (iOS notification delivery
-      // is unreliable):
-      //  - write one 4 kB sector with writeValueWithoutResponse (never
-      //    errors or hangs on iOS; resolves when queued)
-      //  - then poll the readable ctrl value [state, received:u32, error]
-      //    until the device reports the sector as committed
-      //  - no data is in flight while the device erases+programs flash,
-      //    so the radio queue never collides with the flash stall
       const q = new URLSearchParams(location.search);
+      const dryRun = q.get('otaDryRun') === '1';
       const FLASH_BLOCK = Number(q.get('otaBlock')) > 0 ? Number(q.get('otaBlock')) : 4096;
       const SECTOR_WAIT_MS = Number(q.get('otaWait')) > 0 ? Number(q.get('otaWait')) : 3000;
-      const readCtrl = async () => {
+      const MAX_ROUNDS = Number(q.get('otaRounds')) > 0 ? Number(q.get('otaRounds')) : 12;
+      const readCtrl = async (ctrl) => {
         const v = await ctrl.readValue();
         return { state: v.getUint8(0), received: v.getUint32(1, true), error: v.getUint8(5) };
       };
-      addLog(`Protocol: per-sector stop-and-wait, chunks ${chunk} B, blok ${FLASH_BLOCK / 1024} kB`);
-      for (let off = 0; off < blob.length; ) {
-        const sectorEnd = Math.min(off + FLASH_BLOCK, blob.length);
-        while (off < sectorEnd) {
-          const part = blob.subarray(off, Math.min(off + chunk, sectorEnd));
-          try {
-            await data.writeValueWithoutResponse(part);
-          } catch (err) {
-            const msg = String(err?.message ?? err);
-            if (chunk > 20) {
-              chunk = chunk > 128 ? 128 : (chunk > 64 ? 64 : 20);
-              addLog(`Schrijffout op ${off} bytes (${msg}) — chunk verkleind naar ${chunk} bytes`, 'warn');
-              continue; // retry the same offset
-            }
-            throw err;
+
+      // Image + signature as one continuous blob
+      if (!sig || sig.length !== 64) {
+        throw new Error('geen geldige handtekening (64 bytes vereist)');
+      }
+      const blob = new Uint8Array(bytes.length + 64);
+      blob.set(bytes, 0);
+      blob.set(sig, bytes.length);
+      let lastReported = 0;
+
+      let chunk = 0;
+      let confirmed = 0; // device-confirmed bytes (4 kB aligned)
+      let round = 0;
+      let ctrl = null;
+
+      while (confirmed < blob.length && round < MAX_ROUNDS) {
+        round++;
+        try {
+          if (!dev.gatt.connected) {
+            addLog(`Verbinding verbroken — opnieuw verbinden (ronde ${round})…`);
+            await dev.gatt.connect();
+            await sleep(1500);
+            if (!dev.gatt.connected) throw new Error('herverbinding mislukt');
           }
-          off += part.length;
-          setProgress(off / blob.length);
-        }
-        if (sectorEnd < blob.length) {
-          // Wait until the device confirms the sector is on flash
-          const deadline = Date.now() + SECTOR_WAIT_MS;
-          for (;;) {
-            const st = await readCtrl();
-            if (st.error !== 0) {
-              throw new Error(`apparaatfout 0x${st.error.toString(16)} op ${st.received} bytes`);
+          addLog(`OTA-service opzoeken (0xFF20)… (ronde ${round})`);
+          const svc = await dev.gatt.getPrimaryService(SVC_UUID);
+          ctrl = await svc.getCharacteristic(CTRL_UUID);
+          const data = await svc.getCharacteristic(DATA_UUID);
+          ctrl.addEventListener('characteristicvaluechanged', onNotify);
+          await ctrl.startNotifications();
+
+          if (chunk === 0) {
+            // MTU probe (BLEOTA-style): without-response fails fast where
+            // an oversized writeValue would hang the iOS shim.
+            for (const candidate of [244, 180, 128, 64, 20]) {
+              try {
+                await data.writeValueWithoutResponse(new Uint8Array(candidate));
+                chunk = candidate;
+                break;
+              } catch (_) { /* try the next smaller size */ }
             }
-            if (st.received >= sectorEnd) break;
-            if (Date.now() > deadline) {
-              throw new Error(`apparaat volgt niet (${st.received} < ${sectorEnd} bytes)`);
-            }
-            await sleep(60);
+            if (!chunk) chunk = 20;
+            addLog(`MTU-probe: ${chunk} bytes per schrijfactie`);
           }
-        }
-        if (off - lastReported >= blob.length / 10 || off === blob.length) {
-          lastReported = off;
-          addLog(`Overgebracht: ${Math.round(off / 1024)} / ${Math.round(blob.length / 1024)} kB (${Math.round(off / blob.length * 100)}%) [${elapsed()}]`);
+
+          // START [0x01][total:u32][crc:u32][img_size:u32][flags:u32][offset:u32]
+          const imageCrc = crc32(bytes);
+          const cmd = new Uint8Array(dryRun ? 17 : 21);
+          const cmdDv = new DataView(cmd.buffer);
+          cmd[0] = 0x01;
+          cmdDv.setUint32(1, bytes.length + 64, true); // total
+          cmdDv.setUint32(5, imageCrc, true);          // crc of image bytes
+          cmdDv.setUint32(9, bytes.length, true);      // image size
+          if (dryRun) cmdDv.setUint32(13, 1, true);
+          else cmdDv.setUint32(17, confirmed, true);   // resume offset
+          await ctrl.writeValue(cmd);
+          addLog(`START verstuurd${dryRun ? ' (DRY RUN)' : ''} ronde ${round}: verder vanaf ${confirmed} bytes, crc 0x${imageCrc.toString(16).padStart(8, '0')} [${elapsed()}]`);
+
+          // Stream sectors with per-sector stop-and-wait (polled progress)
+          for (let off = confirmed; off < blob.length; ) {
+            const sectorEnd = Math.min(off + FLASH_BLOCK, blob.length);
+            while (off < sectorEnd) {
+              const part = blob.subarray(off, Math.min(off + chunk, sectorEnd));
+              try {
+                await data.writeValueWithoutResponse(part);
+              } catch (err) {
+                const msg = String(err?.message ?? err);
+                if (chunk > 20) {
+                  chunk = chunk > 128 ? 128 : (chunk > 64 ? 64 : 20);
+                  addLog(`Schrijffout op ${off} bytes (${msg}) — chunk verkleind naar ${chunk} bytes`, 'warn');
+                  continue; // retry the same offset
+                }
+                throw err;
+              }
+              off += part.length;
+              setProgress(off / blob.length);
+            }
+            if (sectorEnd < blob.length) {
+              const deadline = Date.now() + SECTOR_WAIT_MS;
+              for (;;) {
+                const st = await readCtrl(ctrl);
+                if (st.error !== 0) {
+                  throw new Error(`apparaatfout 0x${st.error.toString(16)} op ${st.received} bytes`);
+                }
+                if (st.received >= sectorEnd) break;
+                if (Date.now() > deadline) {
+                  throw new Error(`apparaat volgt niet (${st.received} < ${sectorEnd} bytes)`);
+                }
+                await sleep(60);
+              }
+              confirmed = Math.max(confirmed, sectorEnd);
+            }
+            if (off - lastReported >= blob.length / 10 || off === blob.length) {
+              lastReported = off;
+              addLog(`Overgebracht: ${Math.round(off / 1024)} / ${Math.round(blob.length / 1024)} kB (${Math.round(off / blob.length * 100)}%) [${elapsed()}]`);
+            }
+          }
+          confirmed = blob.length;
+          ctrl.removeEventListener('characteristicvaluechanged', onNotify);
+        } catch (roundErr) {
+          const msg = roundErr?.message || roundErr;
+          addLog(`Ronde ${round} afgebroken bij ${confirmed} bytes: ${msg}`, 'warn');
+          if (/apparaatfout/.test(String(msg))) {
+            throw roundErr; // device reported a protocol error — do not retry
+          }
+          await sleep(1500);
         }
       }
-      addLog(`Alle ${blob.length} bytes overgebracht [${elapsed()}]`);
+      if (confirmed < blob.length) {
+        throw new Error(`overdracht niet voltooid na ${round} ronden (${confirmed} bytes)`);
+      }
+      addLog(`Alle ${blob.length} bytes overgebracht in ${round} ronde(s) [${elapsed()}]`);
 
       // FINISH [0x02] — device verifies CRC + signature, then reboots
       setStatus('Controleren…');

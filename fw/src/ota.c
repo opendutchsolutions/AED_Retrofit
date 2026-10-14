@@ -359,26 +359,30 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     return;
   }
   switch (buffer[0]) {
-  case 0x01: { // START [total_size:u32][crc32:u32][img_size:u32][flags:u32]
+  case 0x01: { // START [total_size:u32][crc32:u32][img_size:u32][flags:u32][offset:u32]
     // total_size = image bytes + 64-byte signature appended at the end;
-    // flags bit0 = dry run (count bytes only, no flash writes)
+    // flags bit0 = dry run (count bytes only, no flash writes);
+    // offset = resume point (4 kB aligned) — sectors below it were
+    // already staged by a previous interrupted transfer
     if (size < 13) {
       return;
     }
     uint32_t flags = (size >= 17) ? little_endian_read_32(buffer, 13) : 0;
+    uint32_t resume_off = (size >= 21) ? little_endian_read_32(buffer, 17) : 0;
     uint32_t total_size = little_endian_read_32(buffer, 1);
     uint32_t total_crc = little_endian_read_32(buffer, 5);
     uint32_t img_size = little_endian_read_32(buffer, 9);
     if (img_size == 0 || img_size > OTA_STAGING_SIZE ||
-        total_size != img_size + 64 || total_size > OTA_STAGING_SIZE + 64) {
+        total_size != img_size + 64 || total_size > OTA_STAGING_SIZE + 64 ||
+        resume_off > img_size || (resume_off % FLASH_SECTOR_SIZE_4K) != 0) {
       set_error(OTA_ERR_TOO_BIG);
       return;
     }
     _image_size = img_size;
     _image_crc = total_crc; // CRC covers image bytes only (0..img_size)
-    _received = 0;
+    _received = resume_off;
     _buf_fill = 0;
-    _sector_count = 0;
+    _sector_count = resume_off / FLASH_SECTOR_SIZE_4K;
     _dry_run = (flags & 1u) != 0;
     _have_signature = false;
     _error = OTA_ERR_NONE;
