@@ -101,7 +101,7 @@ export function useOta({ getDevice, setOtaActive }) {
       // shims). Each round (re)connects, STARTs at the last device-
       // confirmed 4 kB boundary and streams as far as it gets; the
       // device keeps already-staged sectors. Repeat until complete.
-      let finalState = null; // verdict via polled ctrl reads
+      // (verdict comes from polled ctrl reads — see the round loop)
       const stateName = { 1: 'ontvangst bevestigd', 2: 'controle CRC + handtekening', 3: 'gereed', 4: 'fout' };
 
       const q = new URLSearchParams(location.search);
@@ -183,7 +183,7 @@ export function useOta({ getDevice, setOtaActive }) {
             // an oversized writeValue would hang the iOS shim.
             for (const candidate of [244, 180, 128, 64, 20]) {
               try {
-                await data.writeValueWithoutResponse(new Uint8Array(candidate));
+                await withTimeout(data.writeValueWithoutResponse(new Uint8Array(candidate)), 'MTU-probe');
                 chunk = candidate;
                 break;
               } catch (_) { /* try the next smaller size */ }
@@ -290,68 +290,60 @@ export function useOta({ getDevice, setOtaActive }) {
           // may be silently corrupted and the resume must overwrite them.
           confirmed = verified;
           await sleep(1500);
+          continue;
         }
+
+        // All bytes confirmed — FINISH. The device flushes the final
+        // partial sector, verifies CRC + signature and reboots. A verify
+        // failure throws HERE, inside a round, so the rollback above
+        // retries from the last verified boundary.
+        addLog(`Alle ${blob.length} bytes overgebracht in ${round} ronde(s) [${elapsed()}]`);
+        if (dryRun) {
+          addLog('DRY RUN geslaagd — alle bytes ontvangen, niets naar flash geschreven. Dit was een diagnostische test.', 'ok');
+          setStatus('Dry-run geslaagd (diagnostisch).');
+          return true;
+        }
+        setStatus('Controleren…');
+        await withTimeout(ctrl.writeValue(new Uint8Array([0x02])), 'FINISH');
+        addLog('FINISH verstuurd — apparaat controleert CRC + handtekening');
+        let verdict = null;
+        {
+          const deadline = Date.now() + 30000;
+          while (verdict === null && Date.now() < deadline) {
+            if (!dev.gatt?.connected) {
+              // A post-FINISH disconnect means the device is rebooting to
+              // apply the update — a passed verify is the only path that
+              // reboots the device after FINISH.
+              addLog('Verbinding verbroken na de controle — het apparaat past de update toe en start opnieuw op', 'ok');
+              setProgress(1);
+              setStatus('Update voltooid. De oefen-AED start opnieuw op met de nieuwe firmware.');
+              return true;
+            }
+            try {
+              const st = await readCtrl(ctrl);
+              if (st.state === OTA_STATE.READY || st.state === OTA_STATE.ERROR) {
+                verdict = st.state;
+                addLog(`Eindstatus: ${stateName[st.state] || st.state}`, st.state === OTA_STATE.ERROR ? 'err' : 'info');
+              }
+            } catch (_) { /* read may fail while the device reboots */ }
+            await sleep(300);
+          }
+        }
+        if (verdict === OTA_STATE.ERROR) {
+          throw new Error('controle mislukt (CRC of handtekening) — opnieuw vanaf de laatst geverifieerde bytes');
+        }
+        if (verdict === null) {
+          throw new Error('geen antwoord van het apparaat');
+        }
+        setProgress(1);
+        addLog('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.', 'ok');
+        setStatus('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.');
+        return true;
       }
       if (confirmed < blob.length) {
         throw new Error(`overdracht niet voltooid na ${round} ronden (${confirmed} bytes)`);
       }
-      // Final gate: verify the full staged image before FINISH
-      {
-        const want = crc32(blob.subarray(0, bytes.length));
-        const got = await stagingCrc(ctrl, bytes.length);
-        if (got !== want) {
-          throw new Error(
-            `staging-corruptie gedetecteerd vóór afronding ` +
-            `(apparaat 0x${(got ?? 0).toString(16)} != 0x${want.toString(16)})`);
-        }
-        addLog('Staging volledig geverifieerd (controle-som klopt)');
-      }
-      addLog(`Alle ${blob.length} bytes overgebracht in ${round} ronde(s) [${elapsed()}]`);
-
-      // FINISH [0x02] — device verifies CRC + signature, then reboots
-      setStatus('Controleren…');
-      await withTimeout(ctrl.writeValue(new Uint8Array([0x02])), 'FINISH');
-      addLog('FINISH verstuurd — apparaat controleert CRC + handtekening');
-
-      // Wait for the verdict: via notification when the browser delivers
-      // them, otherwise by polling the readable ctrl state (some iOS Web
-      // Bluetooth shims don't surface notifications during streaming).
-      let polledState = null;
-      const deadline = Date.now() + 30000;
-      while (finalState === null && polledState === null && Date.now() < deadline) {
-        await sleep(300);
-        if (finalState !== null) break;
-        if (!dev.gatt?.connected) {
-          // The only code path that reboots the device after FINISH is a
-          // passed CRC + signature verify, so a post-FINISH disconnect
-          // means the update was accepted and the device is restarting.
-          addLog('Verbinding verbroken na de controle — het apparaat past de update toe en start opnieuw op', 'ok');
-          setProgress(1);
-          setStatus('Update voltooid. De oefen-AED start opnieuw op met de nieuwe firmware.');
-          return true;
-        }
-        try {
-          const v = await ctrl.readValue();
-          const s = v.getUint8(0);
-          if (s === OTA_STATE.READY || s === OTA_STATE.ERROR) {
-            polledState = s;
-            addLog(`Eindstatus via polling: ${stateName[s] || s}`, s === OTA_STATE.ERROR ? 'err' : 'info');
-          }
-        } catch (_) { /* read may fail while the device reboots */ }
-      }
-      const verdict = finalState ?? polledState;
-
-      if (verdict === OTA_STATE.ERROR) throw new Error('controle mislukt (CRC of handtekening)');
-      if (verdict == null) throw new Error('geen antwoord van het apparaat');
-      setProgress(1);
-      if (dryRun) {
-        addLog('DRY RUN geslaagd — alle bytes ontvangen, niets naar flash geschreven. Dit was een diagnostische test.', 'ok');
-        setStatus('Dry-run geslaagd (diagnostisch).');
-        return true;
-      }
-      addLog('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.', 'ok');
-      setStatus('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.');
-      return true;
+      throw new Error('overdracht onverwacht beëindigd');
     } catch (e) {
       const msg = e?.message || e;
       addLog(`Update mislukt: ${msg} [${((Date.now() - started) / 1000).toFixed(1)}s]`, 'err');
