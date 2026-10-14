@@ -162,86 +162,60 @@ export function useOta({ getDevice, setOtaActive }) {
       }
       blob.set(sig, bytes.length);
       let lastReported = 0;
-      let ackTimeoutWarned = false;
-      // Write-with-response only: each packet is acknowledged round-trip,
-      // so the JS pacing is the true radio pacing. writeValueWithoutResponse
-      // resolves when CoreBluetooth queues the packet — the radio keeps
-      // transmitting the queue backlog while the device is in its ~47 ms
-      // flash stall, overflowing the controller and killing the link with
-      // a supervision timeout a variable way into the transfer.
+      // BLEOTA-style per-sector stop-and-wait, with the progress signal
+      // POLLED instead of notification-based (iOS notification delivery
+      // is unreliable):
+      //  - write one 4 kB sector with writeValueWithoutResponse (never
+      //    errors or hangs on iOS; resolves when queued)
+      //  - then poll the readable ctrl value [state, received:u32, error]
+      //    until the device reports the sector as committed
+      //  - no data is in flight while the device erases+programs flash,
+      //    so the radio queue never collides with the flash stall
       const q = new URLSearchParams(location.search);
       const FLASH_BLOCK = Number(q.get('otaBlock')) > 0 ? Number(q.get('otaBlock')) : 4096;
-      const ACK_TIMEOUT_MS = 2000;
-      const FLUSH_PAUSE_MS = Number(q.get('otaPause')) >= 0 ? Number(q.get('otaPause')) : 250;
-      // A hung write (some iOS shims never resolve writeValue on
-      // oversized or wedged packets) must surface as an error instead
-      // of silently stalling the transfer.
-      const WRITE_TIMEOUT_MS = 8000;
-      const writeWithTimeout = async (part) => {
-        let timer = null;
-        try {
-          return await Promise.race([
-            data.writeValue(part),
-            new Promise((_, reject) => {
-              timer = setTimeout(() => reject(new Error('schrijfactie reageert niet (8s)')), WRITE_TIMEOUT_MS);
-            }),
-          ]);
-        } finally {
-          clearTimeout(timer);
-        }
+      const SECTOR_WAIT_MS = Number(q.get('otaWait')) > 0 ? Number(q.get('otaWait')) : 3000;
+      const readCtrl = async () => {
+        const v = await ctrl.readValue();
+        return { state: v.getUint8(0), received: v.getUint32(1, true), error: v.getUint8(5) };
       };
-      const waitForAck = async (expected) => {
-        const deadline = Date.now() + ACK_TIMEOUT_MS;
-        while (ackCount < expected && Date.now() < deadline) {
-          await sleep(20);
-        }
-        return ackCount >= expected;
-      };
-      let nextBoundary = FLASH_BLOCK;
-      addLog(`Schrijfrichting: write-with-response, chunks ${chunk} B, blok ${FLASH_BLOCK / 1024} kB, pauze ${FLUSH_PAUSE_MS} ms`);
-      for (let off = 0, n = 0; off < blob.length; n++) {
-        const part = blob.subarray(off, Math.min(off + chunk, blob.length));
-        try {
-          await writeWithTimeout(part); // with response: radio-paced
-        } catch (err) {
-          const msg = String(err?.message ?? err);
-          // The negotiated ATT MTU varies per platform (iOS ~185, no API
-          // to query it). Shrink the chunk until the write is accepted.
-          if (chunk > 20) {
-            chunk = chunk > 128 ? 128 : (chunk > 64 ? 64 : 20);
-            addLog(`Schrijffout op ${off} bytes (${msg}) — chunk verkleind naar ${chunk} bytes`, 'warn');
-            continue; // write failed → retry the same offset
+      addLog(`Protocol: per-sector stop-and-wait, chunks ${chunk} B, blok ${FLASH_BLOCK / 1024} kB`);
+      for (let off = 0; off < blob.length; ) {
+        const sectorEnd = Math.min(off + FLASH_BLOCK, blob.length);
+        while (off < sectorEnd) {
+          const part = blob.subarray(off, Math.min(off + chunk, sectorEnd));
+          try {
+            await data.writeValueWithoutResponse(part);
+          } catch (err) {
+            const msg = String(err?.message ?? err);
+            if (chunk > 20) {
+              chunk = chunk > 128 ? 128 : (chunk > 64 ? 64 : 20);
+              addLog(`Schrijffout op ${off} bytes (${msg}) — chunk verkleind naar ${chunk} bytes`, 'warn');
+              continue; // retry the same offset
+            }
+            throw err;
           }
-          throw err;
+          off += part.length;
+          setProgress(off / blob.length);
         }
-        const prevOff = off;
-        off += part.length;
-        setProgress(off / blob.length);
-        // Block boundary: wait for the device to confirm the sector flush
-        if (prevOff < nextBoundary && off >= nextBoundary && off < blob.length) {
-          nextBoundary += FLASH_BLOCK;
-          const block = Math.floor(off / FLASH_BLOCK); // completed blocks
-          const acked = await waitForAck(block + 1);    // +1 for the START ack
-          if (acked) {
-            if (block === 1) {
-              addLog(`Sectie-bevestigingen ontvangen — stop-and-wait pacing actief (${FLASH_BLOCK / 1024} kB per blok)`);
+        if (sectorEnd < blob.length) {
+          // Wait until the device confirms the sector is on flash
+          const deadline = Date.now() + SECTOR_WAIT_MS;
+          for (;;) {
+            const st = await readCtrl();
+            if (st.error !== 0) {
+              throw new Error(`apparaatfout 0x${st.error.toString(16)} op ${st.received} bytes`);
             }
-          } else {
-            // No ACK (e.g. iOS shims that don't deliver notifications
-            // during streaming): always fall back to fixed pacing —
-            // the flush stall still needs the breathing room.
-            if (!ackTimeoutWarned) {
-              ackTimeoutWarned = true;
-              addLog(`Geen sectie-bevestiging na ${ACK_TIMEOUT_MS} ms — verder met vaste pauze van ${FLUSH_PAUSE_MS} ms per blok`, 'warn');
+            if (st.received >= sectorEnd) break;
+            if (Date.now() > deadline) {
+              throw new Error(`apparaat volgt niet (${st.received} < ${sectorEnd} bytes)`);
             }
-            await sleep(FLUSH_PAUSE_MS);
+            await sleep(60);
           }
         }
         if (off - lastReported >= blob.length / 10 || off === blob.length) {
           lastReported = off;
           addLog(`Overgebracht: ${Math.round(off / 1024)} / ${Math.round(blob.length / 1024)} kB (${Math.round(off / blob.length * 100)}%) [${elapsed()}]`);
         }
-        if (n % 16 === 0) await sleep(15);
       }
       addLog(`Alle ${blob.length} bytes overgebracht [${elapsed()}]`);
 
