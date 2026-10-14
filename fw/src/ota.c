@@ -87,6 +87,7 @@ static uint32_t _received = 0;
 static uint32_t _buf_fill = 0;
 static uint32_t _sector_count = 0;
 static bool _dry_run = false; // START flag bit0: count only, no flash
+static uint32_t _staged_crc = 0; // image crc of the current/last transfer
 static uint8_t _sector_buf[FLASH_SECTOR_SIZE_4K];
 static uint8_t _signature[64];
 static bool _have_signature = false;
@@ -114,6 +115,7 @@ static uint32_t crc32(const uint8_t *data, uint32_t len) {
   return ~crc;
 }
 
+#define OTA_STATUS_LEN 10
 static void status_bytes(uint8_t *out) {
   out[0] = (uint8_t)_state;
   out[1] = _received & 0xFF;
@@ -121,6 +123,10 @@ static void status_bytes(uint8_t *out) {
   out[3] = (_received >> 16) & 0xFF;
   out[4] = (_received >> 24) & 0xFF;
   out[5] = (uint8_t)_error;
+  out[6] = _staged_crc & 0xFF;
+  out[7] = (_staged_crc >> 8) & 0xFF;
+  out[8] = (_staged_crc >> 16) & 0xFF;
+  out[9] = (_staged_crc >> 24) & 0xFF;
 }
 
 static void do_status_notify(void *context) {
@@ -380,6 +386,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     }
     _image_size = img_size;
     _image_crc = total_crc; // CRC covers image bytes only (0..img_size)
+    _staged_crc = total_crc; // resume state survives disconnects
     _received = resume_off;
     _buf_fill = 0;
     _sector_count = resume_off / FLASH_SECTOR_SIZE_4K;
@@ -419,13 +426,13 @@ static uint16_t ota_read_cb(hci_con_handle_t con_handle, uint16_t attr,
   UNUSED(con_handle);
   if (attr == _handle_ctrl_value) {
     if (buffer) {
-      uint8_t status[6];
+      uint8_t status[OTA_STATUS_LEN];
       status_bytes(status);
       uint16_t take =
           (buffer_size < sizeof(status)) ? buffer_size : sizeof(status);
       memcpy(buffer, status, take);
     }
-    return sizeof(uint8_t[6]);
+    return OTA_STATUS_LEN;
   }
   return 0;
 }

@@ -118,7 +118,12 @@ export function useOta({ getDevice, setOtaActive }) {
       const MAX_ROUNDS = Number(q.get('otaRounds')) > 0 ? Number(q.get('otaRounds')) : 12;
       const readCtrl = async (ctrl) => {
         const v = await ctrl.readValue();
-        return { state: v.getUint8(0), received: v.getUint32(1, true), error: v.getUint8(5) };
+        return {
+          state: v.getUint8(0),
+          received: v.getUint32(1, true),
+          error: v.getUint8(5),
+          stagedCrc: v.byteLength >= 10 ? v.getUint32(6, true) : null,
+        };
       };
 
       // Image + signature as one continuous blob
@@ -165,8 +170,29 @@ export function useOta({ getDevice, setOtaActive }) {
             addLog(`MTU-probe: ${chunk} bytes per schrijfactie`);
           }
 
-          // START [0x01][total:u32][crc:u32][img_size:u32][flags:u32][offset:u32]
+          // Device-authoritative resume: the device remembers how much
+          // of which image it staged (survives disconnects and page
+          // reloads). Resume at the last confirmed 4 kB boundary of the
+          // same image; start over if the image changed.
           const imageCrc = crc32(bytes);
+          let resumeOff = confirmed;
+          try {
+            const st = await readCtrl(ctrl);
+            if (st.stagedCrc === imageCrc) {
+              const aligned = Math.floor(st.received / FLASH_BLOCK) * FLASH_BLOCK;
+              if (aligned > resumeOff) {
+                resumeOff = Math.min(aligned, blob.length);
+                addLog(`Apparaat heeft al ${Math.round(resumeOff / 1024)} kB in staging — hervatten vanaf daar`);
+              }
+            } else if (st.stagedCrc !== null && st.stagedCrc !== 0 && st.received > 0) {
+              addLog('Gestaged beeld is verouderd — opnieuw beginnen', 'warn');
+            }
+            if (resumeOff >= blob.length) {
+              confirmed = blob.length; // fully staged already: go verify
+            } else {
+              confirmed = Math.max(confirmed, resumeOff);
+            }
+          } catch (_) { /* pre-read is best-effort */ }
           const cmd = new Uint8Array(dryRun ? 17 : 21);
           const cmdDv = new DataView(cmd.buffer);
           cmd[0] = 0x01;
