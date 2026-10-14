@@ -85,7 +85,7 @@ function DeviceStatusCard({ status, deviceName, running, ledMask }) {
 export default function App() {
   const [screen, setScreen] = useState('verbinden');
   const { play: playAudio, stop: stopAudio, pauseMain, resumeMain, playOverlay } = useAudio();
-  const metronome = useMetronome();
+  const { start: startMetronome, stop: stopMetronome } = useMetronome();
   const [metronomeRatio, setMetronomeRatio] = useState(
     () => localStorage.getItem('metronome-ratio') || 'Uit'
   );
@@ -141,11 +141,11 @@ export default function App() {
   // phase when a metronome ratio is selected
   useEffect(() => {
     if (sim.running && sim.currentStep?.metronome && metronomeRatio !== 'Uit') {
-      metronome.start(metronomeRatio);
-    } else {
-      metronome.stop();
+      startMetronome(metronomeRatio);
+      return () => stopMetronome();
     }
-  }, [sim.running, sim.currentStep, metronomeRatio, metronome]);
+    stopMetronome();
+  }, [sim.running, sim.currentStep, metronomeRatio, startMetronome, stopMetronome]);
   simRef.current = sim;
 
   function onToggleLed(bit) {
@@ -154,6 +154,35 @@ export default function App() {
   }
 
   const connected = ble.status === 'connected';
+  // Audible buzzer emulation for simulation mode: the trainer's zoemer
+  // bit in the LED mask drives a continuous beep, so shock-advised and
+  // don't-touch phases are also audible without hardware.
+  const buzzerAudioRef = useRef(null);
+  useEffect(() => {
+    const on = !connected && !!(ble.ledMask & (1 << 6));
+    if (on && !buzzerAudioRef.current) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = 880;
+        gain.gain.value = 0.06;
+        osc.connect(gain).connect(ctx.destination);
+        osc.start();
+        buzzerAudioRef.current = { ctx, osc, gain };
+      } catch (e) { /* no WebAudio */ }
+    } else if (!on && buzzerAudioRef.current) {
+      const { ctx, osc, gain } = buzzerAudioRef.current;
+      try {
+        gain.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
+        osc.stop(ctx.currentTime + 0.1);
+        ctx.close();
+      } catch (e) { /* already closed */ }
+      buzzerAudioRef.current = null;
+    }
+  }, [ble.ledMask, connected]);
+
 
   // Classic audio hint: shown after BLE connect until the classic audio link
   // is up (bit0 = peer known, bit1 = classic connected — see fw gatt_service.c)
@@ -187,7 +216,7 @@ export default function App() {
     <>
       <header className="site-header">
         <div className="brand" aria-label="AED Oefensysteem">
-          <span className="brand-mark" aria-hidden="true">♥</span>
+          <img className="brand-mark" src="ods-logo.svg" alt="" aria-hidden="true" />
           <div>
             <strong>AED Oefensysteem</strong>
             <span>Bediening voor instructeurs</span>
@@ -289,7 +318,9 @@ export default function App() {
               {sim.running && sim.currentStep && (
                 <div className="step-banner">
                   <span>
-                    <strong>{sim.currentStep.label}</strong> — {sim.currentStep.instruction}
+                    <strong>{sim.currentStep.label}</strong> — {(sim.currentStep.metronome && metronomeRatio !== 'Uit')
+                      ? sim.currentStep.instruction.replace(/30:2/g, metronomeRatio)
+                      : sim.currentStep.instruction}
                   </span>
                   <button className="button compact secondary" onClick={() => setScreen('oefenen')}>
                     Naar Oefenen

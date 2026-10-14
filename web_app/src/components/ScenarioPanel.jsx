@@ -87,7 +87,11 @@ export function ScenarioPanel({
           <div className="card-heading" style={{ marginTop: '.8rem' }}>
             <div>
               <h3>{currentStep.label}</h3>
-              <p className="muted">{currentStep.instruction}</p>
+              <p className="muted">
+                {currentStep.metronome && metronome !== 'Uit'
+                  ? currentStep.instruction.replace(/30:2/g, metronome)
+                  : currentStep.instruction}
+              </p>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
               {badge && <Badge color={badge.color}>{badge.label}</Badge>}

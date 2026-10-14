@@ -21,6 +21,7 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio, stopA
   const timerRef         = useRef(null);
   const countRef         = useRef(null);
   const buzzerTimerRef   = useRef(null);
+  const infoFlashRef     = useRef(null); // { delay, interval }
   const expectBtn        = useRef(null);
   const onTimeoutRef     = useRef(null);
 
@@ -40,6 +41,11 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio, stopA
     if (timerRef.current)     { clearTimeout(timerRef.current);   timerRef.current = null; }
     if (countRef.current)     { clearInterval(countRef.current);  countRef.current = null; }
     if (buzzerTimerRef.current) { clearTimeout(buzzerTimerRef.current); buzzerTimerRef.current = null; }
+    if (infoFlashRef.current) {
+      clearTimeout(infoFlashRef.current.delay);
+      clearInterval(infoFlashRef.current.interval);
+      infoFlashRef.current = null;
+    }
     setTimeLeft(null);
     expectBtn.current    = null;
     onTimeoutRef.current = null;
@@ -66,6 +72,21 @@ export function useSimulation({ setLedMask, allLedsOff, addLog, playAudio, stopA
         buzzerTimerRef.current = null;
         setLedMask(mask & ~(1 << 6));
       }, step.buzzer_duration_ms);
+    }
+
+    // Flash the info LED from flash_info_after_ms into the step until it
+    // ends (e.g. "press the info button" mid-prompt)
+    if (step.flash_info_after_ms > 0) {
+      const baseMask = mask;
+      let on = false;
+      const delay = setTimeout(() => {
+        const interval = setInterval(() => {
+          on = !on;
+          setLedMask(on ? (baseMask | (1 << 2)) : (baseMask & ~(1 << 2)));
+        }, 500);
+        if (infoFlashRef.current) infoFlashRef.current.interval = interval;
+      }, step.flash_info_after_ms);
+      infoFlashRef.current = { delay, interval: null };
     }
 
     // Play audio — custom bank takes priority over built-in files.

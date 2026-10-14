@@ -43,15 +43,9 @@ h1, h2, h3, p { margin: 0; }
 }
 .brand { display: flex; align-items: center; gap: .7rem; }
 .brand-mark {
-  display: grid;
-  place-items: center;
-  width: 2.5rem;
+  width: 4.5rem;
   height: 2.5rem;
-  background: #feecec;
-  color: var(--danger);
-  border: 2px solid #dc8d8d;
-  border-radius: .6rem;
-  font-size: 1.35rem;
+  object-fit: contain;
 }
 .brand span:last-child { display: block; color: var(--muted); font-size: .8rem; }
 
