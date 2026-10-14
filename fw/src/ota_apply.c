@@ -12,6 +12,8 @@
 
 #include <hardware/flash.h>
 #include <hardware/sync.h>
+#include <hardware/structs/psm.h>
+#include <hardware/structs/watchdog.h>
 #include <hardware/watchdog.h>
 #include <pico.h>
 #include <pico/stdlib.h>
@@ -56,13 +58,26 @@ static void __no_inline_not_in_flash_func(flash_and_reset)(uint32_t slot_off,
     }
   }
 
-  // Reset directly via watchdog registers — no flash-resident calls
-  volatile uint32_t *load =
-      (volatile uint32_t *)(WATCHDOG_BASE + WATCHDOG_LOAD_OFFSET);
-  volatile uint32_t *ctrl =
+  // Reset via direct watchdog register writes, mirroring the SDK's
+  // watchdog_reboot(0, 0, 0) — no flash-resident calls may be made once
+  // the main region has been reprogrammed. A plain LOAD=0/ENABLE write
+  // is NOT enough on RP2350: the watchdog also needs the PSM wdsel
+  // reset-domain selection and the CTRL TRIGGER bit for an immediate
+  // system reset, otherwise the chip never resets.
+  volatile uint32_t *wd_ctrl =
       (volatile uint32_t *)(WATCHDOG_BASE + WATCHDOG_CTRL_OFFSET);
-  *load = 0;
-  *ctrl = WATCHDOG_CTRL_ENABLE_BITS;
+  volatile uint32_t *wd_scratch4 =
+      (volatile uint32_t *)(WATCHDOG_BASE + WATCHDOG_SCRATCH4_OFFSET);
+  volatile uint32_t *psm_wdsel =
+      (volatile uint32_t *)(PSM_BASE + PSM_WDSEL_OFFSET);
+  *wd_ctrl &= ~WATCHDOG_CTRL_ENABLE_BITS;
+  *wd_scratch4 = 0; // 0 = boot the regular flash image
+  *psm_wdsel |= PSM_WDSEL_BITS &
+      ~(PSM_WDSEL_ROSC_BITS | PSM_WDSEL_XOSC_BITS);
+  *wd_ctrl &= ~(WATCHDOG_CTRL_PAUSE_DBG0_BITS |
+                WATCHDOG_CTRL_PAUSE_DBG1_BITS |
+                WATCHDOG_CTRL_PAUSE_JTAG_BITS);
+  *wd_ctrl |= WATCHDOG_CTRL_TRIGGER_BITS;
   while (true) {
     tight_loop_contents();
   }
