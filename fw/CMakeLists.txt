@@ -61,13 +61,13 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     #CONN_PIN=26
     BT_PIN="0000"
     BT_NAME="AED-Simulator-1"
-    FW_VERSION="1.0.41"
+    FW_VERSION="1.0.42"
     # TBYB-capable image: OTA updates boot in try mode and are committed
     # by rom_explicit_buy(); the picobin version drives the bootrom's
     # A/B slot choice (major.minor, minor = the patch level of FW_VERSION)
     PICO_CRT0_IMAGE_TYPE_TBYB=1
     PICO_CRT0_VERSION_MAJOR=1
-    PICO_CRT0_VERSION_MINOR=41
+    PICO_CRT0_VERSION_MINOR=42
     # Bounded stdio blocking: printf from btstack/audio callbacks must
     # never stall the run loop for long when the USB host stalls drains
     PICO_STDIO_USB_STDOUT_TIMEOUT_US=50000

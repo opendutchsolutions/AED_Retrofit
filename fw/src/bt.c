@@ -286,6 +286,13 @@ void bt_reconnect_classic(void) {
   _reconnect_pending = (status == ERROR_CODE_SUCCESS);
 }
 
+void bt_disconnect_classic(void) {
+  if (_classic_con_handle != HCI_CON_HANDLE_INVALID) {
+    printf("[bt] dropping classic link after BLE disconnect\n");
+    gap_disconnect(_classic_con_handle);
+  }
+}
+
 void bt_set_classic_suspended(bool suspend) {
   _classic_suspended = suspend;
   if (suspend && _classic_con_handle != HCI_CON_HANDLE_INVALID) {

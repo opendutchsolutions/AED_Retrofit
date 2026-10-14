@@ -83,6 +83,12 @@ void bt_addr(bd_addr_t local_addr);
 void bt_reconnect_classic(void);
 
 /**
+ * @brief Drop the Classic (A2DP) audio link, if connected. Used when the
+ *        BLE central disconnects so the trainer ends the session cleanly.
+ */
+void bt_disconnect_classic(void);
+
+/**
  * @brief Suspend the classic audio link during a firmware update
  *
  * Drops any active A2DP connection and blocks automatic reconnection
