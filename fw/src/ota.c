@@ -86,6 +86,7 @@ static uint32_t _image_crc = 0;
 static uint32_t _received = 0;
 static uint32_t _buf_fill = 0;
 static uint32_t _sector_count = 0;
+static bool _dry_run = false; // START flag bit0: count only, no flash
 static uint8_t _sector_buf[FLASH_SECTOR_SIZE_4K];
 static uint8_t _signature[64];
 static bool _have_signature = false;
@@ -231,6 +232,12 @@ static void finish_transfer(void) {
     set_error(OTA_ERR_NOT_STARTED);
     return;
   }
+  if (_dry_run) {
+    printf("[ota] dry run complete: %u bytes received\n", _received);
+    _state = OTA_READY;
+    notify_status();
+    return; // no flash write, no verify, no reboot — diagnostic only
+  }
   _state = OTA_VERIFYING;
   notify_status();
 
@@ -290,6 +297,10 @@ static void handle_data(const uint8_t *buffer, uint16_t size) {
            _write_count, size);
     return; // ignore data outside a transfer
   }
+  if (_dry_run) {
+    _received += size; // diagnostic mode: count only, no flash
+    return;
+  }
   if (_write_count % 128 == 0) {
     printf("[ota] write #%u (%u bytes, %u in)\n", _write_count, size,
            _received + _buf_fill);
@@ -348,11 +359,13 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     return;
   }
   switch (buffer[0]) {
-  case 0x01: { // START [total_size:u32][crc32:u32][sig_offset:u32]
-    // total_size = image bytes + 64-byte signature appended at the end
+  case 0x01: { // START [total_size:u32][crc32:u32][img_size:u32][flags:u32]
+    // total_size = image bytes + 64-byte signature appended at the end;
+    // flags bit0 = dry run (count bytes only, no flash writes)
     if (size < 13) {
       return;
     }
+    uint32_t flags = (size >= 17) ? little_endian_read_32(buffer, 13) : 0;
     uint32_t total_size = little_endian_read_32(buffer, 1);
     uint32_t total_crc = little_endian_read_32(buffer, 5);
     uint32_t img_size = little_endian_read_32(buffer, 9);
@@ -366,6 +379,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _received = 0;
     _buf_fill = 0;
     _sector_count = 0;
+    _dry_run = (flags & 1u) != 0;
     _have_signature = false;
     _error = OTA_ERR_NONE;
     _state = OTA_RECEIVING;

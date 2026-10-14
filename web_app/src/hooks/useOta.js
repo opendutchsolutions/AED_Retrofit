@@ -141,17 +141,20 @@ export function useOta({ getDevice, setOtaActive }) {
       if (!chunk) chunk = 20;
       addLog(`MTU-probe: ${chunk} bytes per schrijfactie`);
 
-      // START [0x01][total_size:u32][crc32:u32][image_size:u32]
-      // total = image + 64-byte signature appended; crc covers image only
-      const cmd = new Uint8Array(13);
+      // START [0x01][total_size:u32][crc32:u32][image_size:u32][flags:u32]
+      // total = image + 64-byte signature appended; crc covers image only;
+      // flags bit0 = dry run (device counts bytes but writes no flash)
+      const dryRun = new URLSearchParams(location.search).get('otaDryRun') === '1';
+      const cmd = new Uint8Array(dryRun ? 17 : 13);
       const cmdDv = new DataView(cmd.buffer);
       const imageCrc = crc32(bytes);
       cmd[0] = 0x01;
       cmdDv.setUint32(1, bytes.length + 64, true);   // total
       cmdDv.setUint32(5, imageCrc, true);            // crc of image bytes
       cmdDv.setUint32(9, bytes.length, true);        // image size
+      if (dryRun) cmdDv.setUint32(13, 1, true);     // dry-run flag
       await ctrl.writeValue(cmd);
-      addLog(`START verstuurd: ${bytes.length} + 64 bytes, crc 0x${imageCrc.toString(16).padStart(8, '0')} [${elapsed()}]`);
+      addLog(`START verstuurd${dryRun ? ' (DRY RUN — geen flash)' : ''}: ${bytes.length} + 64 bytes, crc 0x${imageCrc.toString(16).padStart(8, '0')} [${elapsed()}]`);
 
       setStatus(`${label} (${Math.ceil(bytes.length / 1024)} kB)…`);
       // Stream image + signature as one continuous blob
@@ -257,6 +260,11 @@ export function useOta({ getDevice, setOtaActive }) {
       if (verdict === OTA_STATE.ERROR) throw new Error('controle mislukt (CRC of handtekening)');
       if (verdict == null) throw new Error('geen antwoord van het apparaat');
       setProgress(1);
+      if (dryRun) {
+        addLog('DRY RUN geslaagd — alle bytes ontvangen, niets naar flash geschreven. Dit was een diagnostische test.', 'ok');
+        setStatus('Dry-run geslaagd (diagnostisch).');
+        return true;
+      }
       addLog('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.', 'ok');
       setStatus('Update geslaagd. De oefen-AED start opnieuw op met de nieuwe firmware.');
       return true;
