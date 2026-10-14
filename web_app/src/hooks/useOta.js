@@ -126,6 +126,21 @@ export function useOta({ getDevice, setOtaActive }) {
       await ctrl.startNotifications();
       addLog('Meldingen geactiveerd op 0xFF21');
 
+      // Probe the usable ATT payload like BLEOTA does: try
+      // writeValueWithoutResponse with decreasing candidate sizes — it
+      // fails fast where a too-large writeValue would hang the iOS shim.
+      // Runs before START so the device ignores the probe writes.
+      let chunk = 0;
+      for (const candidate of [244, 180, 128, 64, 20]) {
+        try {
+          await data.writeValueWithoutResponse(new Uint8Array(candidate));
+          chunk = candidate;
+          break;
+        } catch (_) { /* try the next smaller size */ }
+      }
+      if (!chunk) chunk = 20;
+      addLog(`MTU-probe: ${chunk} bytes per schrijfactie`);
+
       // START [0x01][total_size:u32][crc32:u32][image_size:u32]
       // total = image + 64-byte signature appended; crc covers image only
       const cmd = new Uint8Array(13);
@@ -146,10 +161,6 @@ export function useOta({ getDevice, setOtaActive }) {
         throw new Error('geen geldige handtekening (64 bytes vereist)');
       }
       blob.set(sig, bytes.length);
-      // 128 bytes is safe on every platform (works at the default MTU 23
-      // range negotiated by iOS ~185; a too-large write-with-response can
-      // hang the iOS shim instead of erroring, so don't gamble on 240)
-      let chunk = 128;
       let lastReported = 0;
       let ackTimeoutWarned = false;
       // Write-with-response only: each packet is acknowledged round-trip,
