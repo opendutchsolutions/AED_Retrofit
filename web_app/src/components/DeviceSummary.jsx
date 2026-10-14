@@ -90,7 +90,7 @@ export function DeviceSummary({ deviceName, classicStatus, fwVersion, getDevice,
         </>
       ) : (
         <p className="message" role="status" style={{ marginBottom: 0 }}>
-          Firmware is actueel.
+          Firmware is up-to-date.
         </p>
       )}
       {progress != null && (

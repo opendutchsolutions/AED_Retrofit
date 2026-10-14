@@ -142,7 +142,8 @@ export default function App() {
 
   const classicOk = ble.classicStatus !== null && (ble.classicStatus & 0b11) === 0b11;
   const classicPeerKnown = ble.classicStatus !== null && (ble.classicStatus & 1) !== 0;
-  const showAudioHint = connected && !audioHintDismissed && !classicOk;
+  const showAudioHint =
+    connected && !audioHintDismissed && ble.classicStatus !== null && !classicOk;
 
   return (
     <>

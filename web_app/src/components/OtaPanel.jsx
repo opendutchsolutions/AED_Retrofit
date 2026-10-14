@@ -60,7 +60,7 @@ export function OtaPanel({ connected, fwVersion, getDevice, setOtaActive }) {
       </dl>
       {versionKnown && !updateAvailable ? (
         <p className="message" role="status" style={{ marginBottom: 0 }}>
-          Firmware is actueel.
+          Firmware is up-to-date.
         </p>
       ) : (
         <>
