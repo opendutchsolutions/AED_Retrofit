@@ -30,6 +30,7 @@
 #include "hardware/clocks.h"
 #include "hardware/watchdog.h"
 #include "ota.h"
+#include "pico/bootrom.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
 #include <btstack_run_loop.h>
@@ -70,13 +71,32 @@ void fatal(void) {
 static void on_bt_up(void *context) { printf("Bluetooth stack is up\n"); }
 
 // --- Serial self-test commands (used to test the OTA flash path without
-// --- a BLE transport): "otatest <bytes>" and "otaapply <bytes>"
+// --- a BLE transport): "otatest <bytes>"
+static int _buy_rc = -999; // explicit-buy rc from the last flash-update boot
+
 static char _cmd_buf[64];
 static uint8_t _cmd_len = 0;
 static btstack_timer_source_t _serial_timer;
 
 static uint32_t parse_num(const char *s) {
   uint32_t v = 0;
+  if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    s += 2;
+    for (;;) {
+      char c = *s;
+      if (c >= '0' && c <= '9') {
+        v = v * 16u + (uint32_t)(c - '0');
+      } else if (c >= 'a' && c <= 'f') {
+        v = v * 16u + (uint32_t)(c - 'a' + 10);
+      } else if (c >= 'A' && c <= 'F') {
+        v = v * 16u + (uint32_t)(c - 'A' + 10);
+      } else {
+        break;
+      }
+      s++;
+    }
+    return v;
+  }
   while (*s >= '0' && *s <= '9') {
     v = v * 10u + (uint32_t)(*s - '0');
     s++;
@@ -99,12 +119,27 @@ static void serial_timer_cb(btstack_timer_source_t *ts) {
           continue;
         }
         uint32_t n = 0;
-        if (strncmp(_cmd_buf, "otatest ", 8) == 0 &&
-            (n = parse_num(_cmd_buf + 8)) > 0) {
-          ota_selftest(n);
-        } else if (strncmp(_cmd_buf, "otaapply ", 9) == 0 &&
-                   (n = parse_num(_cmd_buf + 9)) > 0) {
-          ota_apply_selftest(n);
+        uint32_t off = 0;
+        if (strncmp(_cmd_buf, "otatest ", 8) == 0) {
+          char *sp = strchr(_cmd_buf + 8, ' ');
+          if (sp) {
+            off = parse_num(sp + 1);
+            *sp = '\0';
+          }
+          n = parse_num(_cmd_buf + 8);
+          if (n > 0) {
+            ota_selftest(n, off);
+          }
+        } else if (strcmp(_cmd_buf, "otaboot") == 0) {
+          ota_update_reboot();
+        } else if (strcmp(_cmd_buf, "bootinfo") == 0) {
+          boot_info_t bi;
+          rom_get_boot_info(&bi);
+          printf("[boot] fw %s type %u partition %u params %08x %08x\n", FW_VERSION,
+                 rom_get_last_boot_type(), bi.partition,
+                 bi.reboot_params[0], bi.reboot_params[1]);
+          printf("[ota] buy rc %d, slots rc %d, slot 0x%08x size %u\n", _buy_rc, ota_slots_rc(),
+                 (uint32_t)ota_staging_base(), ota_staging_size());
         } else if (strncmp(_cmd_buf, "pcmtest ", 8) == 0 &&
                    (n = parse_num(_cmd_buf + 8)) > 0) {
           a2dp_pcm_analyze_start(n);
@@ -117,8 +152,8 @@ static void serial_timer_cb(btstack_timer_source_t *ts) {
         } else if (strcmp(_cmd_buf, "pcmreport") == 0) {
           a2dp_pcm_analyze_report();
         } else {
-          printf("commands: got \"%s\" — otatest <b>, otaapply <b>, "
-                 "pcmtest <b>, pcmreport\n", _cmd_buf);
+          printf("commands: got \"%s\" — otatest <b>, stagecrc <b>, "
+                 "stagedump <b>, pcmtest <b>, pcmreport\n", _cmd_buf);
         }
         _cmd_len = 0;
       }
@@ -157,6 +192,7 @@ static void led_pins_init(void) {
   gpio_put(STATUS_LED_B_PIN, 1);
 }
 
+
 int main(void) {
   stdio_init_all();
 
@@ -169,8 +205,15 @@ int main(void) {
   }
 #endif
   printf("AED-Simulator firmware v%s\n", FW_VERSION);
+  if (watchdog_caused_reboot()) {
+    printf("[ota] note: previous reset was watchdog-caused\n");
+  }
 
+  // Resolve the update slot (inactive boot partition) for the OTA service
+  printf("[boot] resolving ota slot\n");
+  ota_slots_init();
   // Initialize CYW43 driver architecture
+  printf("[boot] cyw43 init\n");
   if (cyw43_arch_init()) {
     printf("Failed to init cyw43_arch\n");
     fatal();
@@ -178,13 +221,22 @@ int main(void) {
   }
   cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, false,
                     CYW43_COUNTRY_WORLDWIDE);
+  printf("[boot] cyw43 ok\n");
   // Persistent key-value store — holds the classic audio peer address
   // used to re-establish the A2DP link when BLE (re)connects
   if (!kvs_init()) {
     printf("kvs_init failed\n");
   }
-  // Apply a downloaded OTA image over the main firmware, if any
-  ota_apply_check_and_run();
+  printf("[boot] kvs ok\n");
+  // Commit a flash-update (TBYB) boot so the bootrom keeps this image
+  // and rolls back to the previous slot if we ever fail to reach main()
+  if (rom_get_last_boot_type() == BOOT_TYPE_FLASH_UPDATE) {
+    static __attribute__((aligned(4))) uint8_t buy_workarea[4 * 1024];
+    int rc = rom_explicit_buy(buy_workarea, sizeof(buy_workarea));
+    _buy_rc = rc;
+    printf("[ota] flash-update boot — explicit buy: %d\n", rc);
+  }
+  printf("[boot] bt begin\n");
   bt_begin(BT_NAME, BT_PIN, on_bt_up, NULL);
   led_pins_init();
 

@@ -51,7 +51,6 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/avrcp.c
     src/gatt_service.c
     src/ota.c
-    src/ota_apply.c
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -62,7 +61,13 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     #CONN_PIN=26
     BT_PIN="0000"
     BT_NAME="AED-Simulator-1"
-    FW_VERSION="1.0.28"
+    FW_VERSION="1.0.39"
+    # TBYB-capable image: OTA updates boot in try mode and are committed
+    # by rom_explicit_buy(); the picobin version drives the bootrom's
+    # A/B slot choice (major.minor, minor = the patch level of FW_VERSION)
+    PICO_CRT0_IMAGE_TYPE_TBYB=1
+    PICO_CRT0_VERSION_MAJOR=1
+    PICO_CRT0_VERSION_MINOR=39
     # Bounded stdio blocking: printf from btstack/audio callbacks must
     # never stall the run loop for long when the USB host stalls drains
     PICO_STDIO_USB_STDOUT_TIMEOUT_US=50000
@@ -121,6 +126,38 @@ FetchContent_MakeAvailable(pico-kvstore)
 
 set(KVSTORE_DIR ${pico-kvstore_SOURCE_DIR})
 set(PICO_VFS_DIR ${KVSTORE_DIR}/lib/pico-vfs)
+
+# Partition-table boot: the XIP runtime window only covers the booted
+# partition, so flash reads at absolute XIP addresses beyond it (btstack
+# link-key bank, kv-store) must go through the raw storage window.
+# These dependency sources are patched at configure time (idempotent):
+# a compile-time XIP_BASE override does not work because the SDK header
+# redefines the macro unconditionally.
+if (PICO_RP2350)
+    set(_notranslate_files
+        ${PICO_VFS_DIR}/src/blockdevice/flash.c
+        ${PICO_SDK_PATH}/src/rp2_common/pico_btstack/btstack_flash_bank.c)
+    foreach(_f ${_notranslate_files})
+        file(READ "${_f}" _src)
+        string(REPLACE
+            "(XIP_BASE + flash_target_offset(device) + (size_t)addr)"
+            "(XIP_NOCACHE_NOALLOC_NOTRANSLATE_BASE + flash_target_offset(device) + (size_t)addr)"
+            _src "${_src}")
+        string(REPLACE
+            "(void *)(XIP_BASE + pico_flash_bank_get_storage_offset_func() + (PICO_FLASH_BANK_SIZE * bank) + offset)"
+            "(void *)(XIP_NOCACHE_NOALLOC_NOTRANSLATE_BASE + pico_flash_bank_get_storage_offset_func() + (PICO_FLASH_BANK_SIZE * bank) + offset)"
+            _src "${_src}")
+        string(REPLACE
+            "(void *)(XIP_BASE + bank_start_pos + (page * FLASH_PAGE_SIZE))"
+            "(void *)(XIP_NOCACHE_NOALLOC_NOTRANSLATE_BASE + bank_start_pos + (page * FLASH_PAGE_SIZE))"
+            _src "${_src}")
+        string(REPLACE
+            "(void *)(XIP_BASE + bank_start_pos + (page * FLASH_PAGE_SIZE) + offset + size_left)"
+            "(void *)(XIP_NOCACHE_NOALLOC_NOTRANSLATE_BASE + bank_start_pos + (page * FLASH_PAGE_SIZE) + offset + size_left)"
+            _src "${_src}")
+        file(WRITE "${_f}" "${_src}")
+    endforeach()
+endif()
 
 add_library(blockdevice INTERFACE)
 target_include_directories(blockdevice INTERFACE ${PICO_VFS_DIR}/include)

@@ -1,8 +1,9 @@
 /**
  * @file            ota.c
  * @brief           BLE OTA GATT service (0xFF20) staging an incoming
- *                  firmware image in the OTA slot; the image is verified
- *                  (CRC32 + P-256 ECDSA) and applied at boot by ota_apply.c
+ *                  firmware image in the inactive boot partition; the
+ *                  image is verified (CRC32 + P-256 ECDSA) and applied
+ *                  by the bootrom's TBYB flash-update boot
  *
  * Protocol (little-endian):
  *   0xFF21 control/status — write commands, read + notify status:
@@ -33,9 +34,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "boot/picobin.h"
 #include "boot/picoboot.h"
 #include "bt.h"
-#include "kvstore.h"
+#include "hardware/regs/addressmap.h"
 #include "ota_pub_key.h"
 
 // Declared directly instead of including uECC.h: micro-ecc's asm-labelled
@@ -47,14 +49,59 @@ extern int uECC_verify(const uint8_t public_key[64], const uint8_t hash[32],
 #define OTA_CTRL_UUID 0xFF21
 #define OTA_DATA_UUID 0xFF22
 
-#define KV_KEY_OTA_APPLY "ota_apply"
-#define OTA_APPLY_MAGIC 0x4F544131u /* "OTA1" */
+// Update slot: the inactive boot partition (A/B), resolved from the
+// partition table via the bootrom. The image is staged there and the
+// bootrom boots it (TBYB flash update); the new image commits with
+// rom_explicit_buy() at startup, and the bootrom rolls back to the
+// previous slot if it never boots.
+#define UF2_FAMILY_RP2350_ARM_S 0xe48bff59u
 
-typedef struct {
-  uint32_t magic;
-  uint32_t size;
-  uint32_t crc;
-} ota_apply_record_t;
+static uint32_t _slot_off = 0; // flash storage offset of the inactive partition
+static uint32_t _staging_size = 0;
+static uint8_t _bootrom_workarea[4096] __attribute__((aligned(4)));
+
+// Reads of the staged image go through the raw storage (no-translate)
+// window: with a partition-table boot, the normal XIP window only covers
+// the partition the running image booted from, not the inactive one.
+static const uint8_t *staging_read_ptr(uint32_t off) {
+  return (const uint8_t *)(XIP_NOCACHE_NOALLOC_NOTRANSLATE_BASE + _slot_off + off);
+}
+
+static int _slots_rc = -999; // bootrom rc from the last slot resolution
+
+int ota_slots_rc(void) { return _slots_rc; }
+
+bool ota_slots_init(void) { // returns false only on negative bootrom rc
+  resident_partition_t part;
+  int rc = rom_get_uf2_target_partition(_bootrom_workarea,
+                                        sizeof(_bootrom_workarea),
+                                        UF2_FAMILY_RP2350_ARM_S, &part);
+  _slots_rc = rc;
+  // >= 0 is the chosen partition index; only negative values are errors
+  if (rc < 0) {
+    printf("[ota] no partition table (bootrom rc %d) — OTA disabled\n", rc);
+    return false;
+  }
+  uint32_t first =
+      (part.permissions_and_location &
+       PICOBIN_PARTITION_LOCATION_FIRST_SECTOR_BITS) >>
+      PICOBIN_PARTITION_LOCATION_FIRST_SECTOR_LSB;
+  uint32_t last =
+      (part.permissions_and_location &
+       PICOBIN_PARTITION_LOCATION_LAST_SECTOR_BITS) >>
+      PICOBIN_PARTITION_LOCATION_LAST_SECTOR_LSB;
+  _slot_off = first * FLASH_SECTOR_SIZE;
+  _staging_size = (last + 1 - first) * FLASH_SECTOR_SIZE;
+  printf("[ota] update slot: 0x%08x..0x%08x (%u kB)\n",
+         XIP_BASE + _slot_off, XIP_BASE + _slot_off + _staging_size,
+         _staging_size / 1024);
+  return true;
+}
+
+const uint8_t *ota_staging_base(void) {
+  return (const uint8_t *)(XIP_BASE + _slot_off);
+}
+uint32_t ota_staging_size(void) { return _staging_size; }
 
 #define FLASH_SECTOR_SIZE_4K 4096u
 #define FLASH_PAGE_SIZE_256 256u
@@ -162,11 +209,19 @@ static void set_error(ota_error_t err) {
   notify_status();
 }
 
+// TBYB flash-update boot: the bootrom boots the staged image from the
+// inactive partition in try mode; the new image commits with
+// rom_explicit_buy() and a failed boot rolls back to the old slot.
+void ota_update_reboot(void) {
+  printf("[ota] rebooting for flash update (slot 0x%08x)\n",
+         XIP_BASE + _slot_off);
+  rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE, 100,
+             XIP_BASE + _slot_off, 0);
+}
+
 static void reboot_timer_cb(btstack_timer_source_t *ts) {
   UNUSED(ts);
-  printf("[ota] rebooting to apply the update\n");
-  // Plain reset — the new image is applied at boot by ota_apply.c
-  watchdog_reboot(0, 0, 0);
+  ota_update_reboot();
 }
 
 // SHA-256 over the staged image, verified against the P-256 signature.
@@ -185,7 +240,7 @@ static bool verify_signature(void) {
     if (n > sizeof(chunk)) {
       n = sizeof(chunk);
     }
-    memcpy(chunk, (const uint8_t *)(OTA_STAGING_BASE + off), n);
+    memcpy(chunk, staging_read_ptr(off), n);
     pico_sha256_update_blocking(&sha, chunk, n);
   }
   sha256_result_t hash;
@@ -213,7 +268,7 @@ static void ota_program_page(void *param) {
 // Erase + program one buffered sector of the staging area using
 // flash_safe_execute (interrupt-safe, works during BLE).
 static bool flush_sector(void) {
-  _flush_param.offset = OTA_STAGING_BASE - XIP_BASE + _received;
+  _flush_param.offset = _slot_off + _received;
   int rc = flash_safe_execute(ota_erase_sector, &_flush_param, 100);
   if (rc != PICO_OK) {
     printf("[ota] erase failed: %d\n", rc);
@@ -221,7 +276,7 @@ static bool flush_sector(void) {
   }
   _flush_param.buf_off = 0;
   for (uint32_t off = 0; off < FLASH_SECTOR_SIZE_4K; off += FLASH_PAGE_SIZE_256) {
-    _flush_param.offset = OTA_STAGING_BASE - XIP_BASE + _received + off;
+    _flush_param.offset = _slot_off + _received + off;
     _flush_param.buf_off = off;
     rc = flash_safe_execute(ota_program_page, &_flush_param, 100);
     if (rc != PICO_OK) {
@@ -267,7 +322,7 @@ static void finish_transfer(void) {
 
   printf("[ota] verifying %u bytes\n", _image_size);
   // CRC covers the image only — not the 64 signature bytes riding the stream
-  uint32_t crc = crc32((const uint8_t *)OTA_STAGING_BASE, _image_size);
+  uint32_t crc = crc32(staging_read_ptr(0), _image_size);
   if (crc != _image_crc) {
     printf("[ota] crc mismatch (got 0x%08x want 0x%08x)\n", crc, _image_crc);
     set_error(OTA_ERR_CRC);
@@ -277,18 +332,6 @@ static void finish_transfer(void) {
   if (!verify_signature()) {
     printf("[ota] signature verification failed\n");
     set_error(_have_signature ? OTA_ERR_BAD_SIGNATURE : OTA_ERR_NO_SIGNATURE);
-    return;
-  }
-
-  ota_apply_record_t rec = {
-    .magic = OTA_APPLY_MAGIC,
-    .size = _image_size, // image only — the 64 signature bytes are not flashed
-    .crc = crc,
-  };
-  int rc = kvs_set(KV_KEY_OTA_APPLY, &rec, sizeof(rec));
-  if (rc != KVSTORE_SUCCESS) {
-    printf("[ota] could not store apply record: %s\n", kvs_strerror(rc));
-    set_error(OTA_ERR_FLASH);
     return;
   }
 
@@ -381,8 +424,8 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     uint32_t total_size = little_endian_read_32(buffer, 1);
     uint32_t total_crc = little_endian_read_32(buffer, 5);
     uint32_t img_size = little_endian_read_32(buffer, 9);
-    if (img_size == 0 || img_size > OTA_STAGING_SIZE ||
-        total_size != img_size + 64 || total_size > OTA_STAGING_SIZE + 64 ||
+    if (_staging_size == 0 || img_size == 0 || img_size > _staging_size ||
+        total_size != img_size + 64 || total_size > _staging_size + 64 ||
         resume_off > img_size || (resume_off % FLASH_SECTOR_SIZE_4K) != 0) {
       set_error(OTA_ERR_TOO_BIG);
       return;
@@ -426,11 +469,11 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
       return;
     }
     uint32_t off = little_endian_read_32(buffer, 1);
-    if (off > OTA_STAGING_SIZE) {
+    if (off > _staging_size) {
       _stage_check_crc = 0;
       return;
     }
-    _stage_check_crc = off ? crc32((const uint8_t *)OTA_STAGING_BASE, off) : 0;
+    _stage_check_crc = off ? crc32(staging_read_ptr(0), off) : 0;
     printf("[ota] stage-check %u kB -> 0x%08x\n", off / 1024,
            _stage_check_crc);
     break;
@@ -509,19 +552,6 @@ static void ota_hci_handler(uint8_t packet_type, uint16_t channel,
   }
 }
 
-// --- Exported for the audio-path receiver (audio_ota.c) ---
-void ota_feed(const uint8_t *buffer, uint16_t size) {
-  handle_data(buffer, size);
-}
-
-void ota_control(const uint8_t *buffer, uint16_t size) {
-  handle_control(buffer, size);
-}
-
-uint32_t ota_current_offset(void) {
-  return _received + _buf_fill;
-}
-
 void ota_init(void) {
   _handle_service_start = att_db_util_add_service_uuid16(OTA_SERVICE_UUID);
 
@@ -548,16 +578,16 @@ void ota_init(void) {
   hci_add_event_handler(&_hci_cb_reg);
 
   printf("[ota] service ready (ctrl=%d data=%d, staging 0x%08x)\n",
-         _handle_ctrl_value, _handle_data_value, OTA_STAGING_BASE);
+         _handle_ctrl_value, _handle_data_value, XIP_BASE + _slot_off);
 }
 
 void ota_staging_dump(uint32_t offset) {
-  if (offset >= OTA_STAGING_SIZE) {
+  if (offset >= _staging_size) {
     printf("[ota] stagedump: invalid offset %u\n", offset);
     return;
   }
   printf("[ota] stagedump @%u:", offset);
-  const uint8_t *p = (const uint8_t *)OTA_STAGING_BASE + offset;
+  const uint8_t *p = staging_read_ptr(offset);
   for (int i = 0; i < 32; i++) {
     printf(" %02x", p[i]);
   }
@@ -565,28 +595,28 @@ void ota_staging_dump(uint32_t offset) {
 }
 
 void ota_staging_crc(uint32_t size) {
-  if (size == 0 || size > OTA_STAGING_SIZE) {
+  if (size == 0 || size > _staging_size) {
     printf("[ota] stagecrc: invalid size %u\n", size);
     return;
   }
-  uint32_t crc = crc32((const uint8_t *)OTA_STAGING_BASE, size);
+  uint32_t crc = crc32(staging_read_ptr(0), size);
   printf("[ota] stagecrc: %u bytes -> 0x%08x\n", size, crc);
   // per-64 kB chunks to locate corruption
   for (uint32_t off = 0; off < size; off += 65536u) {
     uint32_t n = size - off;
     if (n > 65536u) n = 65536u;
     printf("[ota] stagecrc %3u kB: 0x%08x\n", off / 1024,
-           crc32((const uint8_t *)OTA_STAGING_BASE + off, n));
+           crc32(staging_read_ptr(off), n));
   }
 }
 
-void ota_selftest(uint32_t size) {
-  if (size == 0 || size > OTA_STAGING_SIZE) {
+void ota_selftest(uint32_t size, uint32_t src_off) {
+  if (size == 0 || size > _staging_size) {
     printf("[ota] selftest: invalid size %u\n", size);
     return;
   }
-  printf("[ota] selftest: staging %u bytes of the running image\n", size);
-  const uint8_t *src = (const uint8_t *)XIP_BASE;
+  printf("[ota] selftest: staging %u bytes of flash data at XIP_BASE\n", size);
+  const uint8_t *src = (const uint8_t *)XIP_NOCACHE_NOALLOC_NOTRANSLATE_BASE + src_off;
   _received = 0;
   _buf_fill = 0;
   _sector_count = 0;
@@ -616,7 +646,7 @@ void ota_selftest(uint32_t size) {
   uint32_t ms = (time_us_32() - t0) / 1000;
   printf("[ota] selftest: staged %u bytes in %lu ms (%u sectors)\n",
          size, ms, _sector_count);
-  const uint8_t *staged = (const uint8_t *)OTA_STAGING_BASE;
+  const uint8_t *staged = staging_read_ptr(0);
   uint32_t bad = 0;
   for (uint32_t i = 0; i < size; i++) {
     if (staged[i] != src[i]) {
@@ -625,25 +655,4 @@ void ota_selftest(uint32_t size) {
   }
   printf("[ota] selftest: readback %u/%u mismatching bytes\n", bad, size);
   printf("[ota] selftest %s\n", bad == 0 ? "PASSED" : "FAILED");
-}
-
-void ota_apply_selftest(uint32_t size) {
-  if (size == 0 || size > OTA_STAGING_SIZE) {
-    printf("[ota] selftest apply: invalid size %u\n", size);
-    return;
-  }
-  uint32_t crc = crc32((const uint8_t *)OTA_STAGING_BASE, size);
-  ota_apply_record_t rec = {
-    .magic = OTA_APPLY_MAGIC,
-    .size = size,
-    .crc = crc,
-  };
-  int rc = kvs_set(KV_KEY_OTA_APPLY, &rec, sizeof(rec));
-  if (rc != KVSTORE_SUCCESS) {
-    printf("[ota] selftest apply: kvs_set failed (%s)\n", kvs_strerror(rc));
-    return;
-  }
-  printf("[ota] selftest apply: record written (size %u, crc 0x%08x), rebooting\n",
-         size, crc);
-  watchdog_reboot(0, 0, 0);
 }
