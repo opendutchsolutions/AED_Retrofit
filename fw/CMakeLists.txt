@@ -62,7 +62,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     #CONN_PIN=26
     BT_PIN="0000"
     BT_NAME="AED-Simulator-1"
-    FW_VERSION="1.0.26"
+    FW_VERSION="1.0.27"
     # Bounded stdio blocking: printf from btstack/audio callbacks must
     # never stall the run loop for long when the USB host stalls drains
     PICO_STDIO_USB_STDOUT_TIMEOUT_US=50000
