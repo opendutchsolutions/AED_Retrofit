@@ -142,8 +142,24 @@ export default function App() {
 
   const classicOk = ble.classicStatus !== null && (ble.classicStatus & 0b11) === 0b11;
   const classicPeerKnown = ble.classicStatus !== null && (ble.classicStatus & 1) !== 0;
+
+  // The classic-audio link can take up to ~10 s to (re)establish after the
+  // device reports the paired peer. Hold the hint back for that window so
+  // it doesn't pop up while the connection is still coming up.
+  const [classicGraceOver, setClassicGraceOver] = useState(false);
+  useEffect(() => {
+    if (ble.classicStatus === null || classicOk) {
+      setClassicGraceOver(false);
+      return;
+    }
+    setClassicGraceOver(false);
+    const t = setTimeout(() => setClassicGraceOver(true), 10000);
+    return () => clearTimeout(t);
+  }, [ble.classicStatus, classicOk]);
+
   const showAudioHint =
-    connected && !audioHintDismissed && ble.classicStatus !== null && !classicOk;
+    connected && !audioHintDismissed && ble.classicStatus !== null &&
+    !classicOk && classicGraceOver;
 
   return (
     <>
