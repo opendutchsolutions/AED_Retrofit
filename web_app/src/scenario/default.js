@@ -10,7 +10,7 @@ export const LANGUAGES = ['Nederlands', 'Duits'];
 export const AUDIO_FILES = {
   Nederlands: {
     warning:       'audio/Nederlands/1_Warning.mp3',
-    place_pads:    'audio/Nederlands/2_PlacePads.wav',
+    place_pads:    'audio/Nederlands/2_PlacePadsv2.mp3',
     analyse:       'audio/Nederlands/3_AnalyseRitme.wav',
     shock_advised: 'audio/Nederlands/4_ShockAdvised.wav',
     shock:         'audio/Nederlands/5_Shock.wav',
@@ -18,6 +18,7 @@ export const AUDIO_FILES = {
     shock_delivered: 'audio/Nederlands/5_6_shock_delivered.wav',
     no_shock:      'audio/Nederlands/6_NoShock.wav',
     cpr:           'audio/Nederlands/7_CPR.wav',
+    kindsleutel:   'audio/Nederlands/kindsleutel_geactiveerd.mp3',
   },
   Duits: {
     warning:       'audio/Duits/Warning.wav',

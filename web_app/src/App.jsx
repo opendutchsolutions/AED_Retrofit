@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useBLE } from './hooks/useBLE';
 import { useAudio } from './hooks/useAudio';
+import { AUDIO_FILES } from './scenario/default';
 import { useSimulation } from './hooks/useSimulation';
 import { StatusChip, ConnectCard } from './components/StatusBar';
 import { DeviceSummary } from './components/DeviceSummary';
@@ -82,13 +83,37 @@ function DeviceStatusCard({ status, deviceName, running, ledMask }) {
 
 export default function App() {
   const [screen, setScreen] = useState('verbinden');
-  const { play: playAudio, stop: stopAudio } = useAudio();
+  const { play: playAudio, stop: stopAudio, playOverlay } = useAudio();
 
   // Forward ref so BLE hook can call into sim without circular dependency
   const simRef = useRef(null);
+  const prevBtnMaskRef = useRef(0);
+
+  // Kindsleutel-check: an additional, non-blocking check anywhere in the
+  // first three steps (warning / place_pads / analyse). When the child
+  // key is inserted, its announcement plays alongside the scenario —
+  // the scenario flow itself is not affected.
   const handleButtonChange = useCallback((mask) => {
+    const CARD_BIT = 3; // card_slot / kindsleutel
+    const wasInserted = (prevBtnMaskRef.current >> CARD_BIT) & 1;
+    const isInserted = (mask >> CARD_BIT) & 1;
+    prevBtnMaskRef.current = mask;
+    if (isInserted && !wasInserted) {
+      const sim = simRef.current;
+      const step = sim?.currentStep;
+      if (step && ['warning', 'place_pads', 'analyse'].includes(step.audioKey)) {
+        const bank = sim?.audioBank || {};
+        const lang = sim?.language || 'Nederlands';
+        const map = AUDIO_FILES[lang] || AUDIO_FILES.Nederlands;
+        const src = bank.kindsleutel?.url
+          || map.kindsleutel
+          || AUDIO_FILES.Nederlands.kindsleutel;
+        playOverlay(src);
+        sim?.logSession && sim.logSession('Kindsleutel geactiveerd — melding afgespeeld', 'ok');
+      }
+    }
     simRef.current?.handleButton(mask);
-  }, []);
+  }, [playOverlay]);
 
   const ble = useBLE({ onButtonChange: handleButtonChange });
 
