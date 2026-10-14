@@ -9,8 +9,8 @@ export const LANGUAGES = ['Nederlands', 'Duits'];
 
 export const AUDIO_FILES = {
   Nederlands: {
-    warning:       'audio/Nederlands/1_Warning.mp3',
-    place_pads:    'audio/Nederlands/2_PlacePadsv2.mp3',
+    warning:       'audio/Nederlands/2_PlacePadsv2.mp3',
+    place_pads:    'audio/Nederlands/2_PlacePads.wav',
     analyse:       'audio/Nederlands/3_AnalyseRitme.wav',
     shock_advised: 'audio/Nederlands/4_ShockAdvised.wav',
     shock:         'audio/Nederlands/5_Shock.wav',
