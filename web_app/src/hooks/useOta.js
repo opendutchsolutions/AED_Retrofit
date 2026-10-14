@@ -101,23 +101,30 @@ export function useOta({ getDevice, setOtaActive }) {
       // shims). Each round (re)connects, STARTs at the last device-
       // confirmed 4 kB boundary and streams as far as it gets; the
       // device keeps already-staged sectors. Repeat until complete.
-      let finalState = null;
+      let finalState = null; // verdict via polled ctrl reads
       const stateName = { 1: 'ontvangst bevestigd', 2: 'controle CRC + handtekening', 3: 'gereed', 4: 'fout' };
-      const onNotify = (e) => {
-        const s = e.target.value.getUint8(0);
-        if (s !== OTA_STATE.RECEIVING) {
-          addLog(`Apparaatstatus: ${stateName[s] || s}`, s === OTA_STATE.ERROR ? 'err' : s === OTA_STATE.READY ? 'ok' : 'info');
-          if (s === OTA_STATE.READY || s === OTA_STATE.ERROR) finalState = s;
-        }
-      };
 
       const q = new URLSearchParams(location.search);
       const dryRun = q.get('otaDryRun') === '1';
       const FLASH_BLOCK = Number(q.get('otaBlock')) > 0 ? Number(q.get('otaBlock')) : 4096;
       const SECTOR_WAIT_MS = Number(q.get('otaWait')) > 0 ? Number(q.get('otaWait')) : 3000;
       const MAX_ROUNDS = Number(q.get('otaRounds')) > 0 ? Number(q.get('otaRounds')) : 12;
+      // iOS Web Bluetooth shims can leave a GATT promise pending
+      // forever (wedged write/read/connect). Every operation gets a
+      // timeout so a wedge becomes a failed round that the resume
+      // machinery retries, instead of an eternal hang.
+      const GATT_TIMEOUT_MS = 6000;
+      const withTimeout = (op, what = 'gatt-operatie') => {
+        let timer = null;
+        return Promise.race([
+          op,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${what} reageert niet (${GATT_TIMEOUT_MS / 1000}s)`)), GATT_TIMEOUT_MS);
+          }),
+        ]).finally(() => clearTimeout(timer));
+      };
       const readCtrl = async (ctrl) => {
-        const v = await ctrl.readValue();
+        const v = await withTimeout(ctrl.readValue(), 'statuslezing');
         return {
           state: v.getUint8(0),
           received: v.getUint32(1, true),
@@ -145,16 +152,16 @@ export function useOta({ getDevice, setOtaActive }) {
         try {
           if (!dev.gatt.connected) {
             addLog(`Verbinding verbroken — opnieuw verbinden (ronde ${round})…`);
-            await dev.gatt.connect();
+            await withTimeout(dev.gatt.connect(), 'herverbinding');
             await sleep(1500);
             if (!dev.gatt.connected) throw new Error('herverbinding mislukt');
           }
           addLog(`OTA-service opzoeken (0xFF20)… (ronde ${round})`);
-          const svc = await dev.gatt.getPrimaryService(SVC_UUID);
-          ctrl = await svc.getCharacteristic(CTRL_UUID);
-          const data = await svc.getCharacteristic(DATA_UUID);
-          ctrl.addEventListener('characteristicvaluechanged', onNotify);
-          await ctrl.startNotifications();
+          const svc = await withTimeout(dev.gatt.getPrimaryService(SVC_UUID), 'service');
+          ctrl = await withTimeout(svc.getCharacteristic(CTRL_UUID), 'kenmerk');
+          const data = await withTimeout(svc.getCharacteristic(DATA_UUID), 'kenmerk');
+          // No notifications: progress comes from polled ctrl reads.
+          // Re-subscribing on every round wedges some iOS shims.
 
           if (chunk === 0) {
             // MTU probe (BLEOTA-style): without-response fails fast where
@@ -201,7 +208,7 @@ export function useOta({ getDevice, setOtaActive }) {
           cmdDv.setUint32(9, bytes.length, true);      // image size
           if (dryRun) cmdDv.setUint32(13, 1, true);
           else cmdDv.setUint32(17, confirmed, true);   // resume offset
-          await ctrl.writeValue(cmd);
+          await withTimeout(ctrl.writeValue(cmd), 'START');
           addLog(`START verstuurd${dryRun ? ' (DRY RUN)' : ''} ronde ${round}: verder vanaf ${confirmed} bytes, crc 0x${imageCrc.toString(16).padStart(8, '0')} [${elapsed()}]`);
 
           // Stream sectors with per-sector stop-and-wait (polled progress)
@@ -210,7 +217,7 @@ export function useOta({ getDevice, setOtaActive }) {
             while (off < sectorEnd) {
               const part = blob.subarray(off, Math.min(off + chunk, sectorEnd));
               try {
-                await data.writeValueWithoutResponse(part);
+                await withTimeout(data.writeValueWithoutResponse(part), 'schrijfactie');
               } catch (err) {
                 const msg = String(err?.message ?? err);
                 if (chunk > 20) {
@@ -244,7 +251,6 @@ export function useOta({ getDevice, setOtaActive }) {
             }
           }
           confirmed = blob.length;
-          ctrl.removeEventListener('characteristicvaluechanged', onNotify);
         } catch (roundErr) {
           const msg = roundErr?.message || roundErr;
           addLog(`Ronde ${round} afgebroken bij ${confirmed} bytes: ${msg}`, 'warn');
@@ -261,7 +267,7 @@ export function useOta({ getDevice, setOtaActive }) {
 
       // FINISH [0x02] — device verifies CRC + signature, then reboots
       setStatus('Controleren…');
-      await ctrl.writeValue(new Uint8Array([0x02]));
+      await withTimeout(ctrl.writeValue(new Uint8Array([0x02])), 'FINISH');
       addLog('FINISH verstuurd — apparaat controleert CRC + handtekening');
 
       // Wait for the verdict: via notification when the browser delivers
@@ -276,7 +282,6 @@ export function useOta({ getDevice, setOtaActive }) {
           // The only code path that reboots the device after FINISH is a
           // passed CRC + signature verify, so a post-FINISH disconnect
           // means the update was accepted and the device is restarting.
-          ctrl.removeEventListener('characteristicvaluechanged', onNotify);
           addLog('Verbinding verbroken na de controle — het apparaat past de update toe en start opnieuw op', 'ok');
           setProgress(1);
           setStatus('Update voltooid. De oefen-AED start opnieuw op met de nieuwe firmware.');
@@ -292,7 +297,6 @@ export function useOta({ getDevice, setOtaActive }) {
         } catch (_) { /* read may fail while the device reboots */ }
       }
       const verdict = finalState ?? polledState;
-      ctrl.removeEventListener('characteristicvaluechanged', onNotify);
 
       if (verdict === OTA_STATE.ERROR) throw new Error('controle mislukt (CRC of handtekening)');
       if (verdict == null) throw new Error('geen antwoord van het apparaat');

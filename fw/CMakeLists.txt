@@ -52,7 +52,6 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/gatt_service.c
     src/ota.c
     src/ota_apply.c
-    src/audio_ota.c
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -63,7 +62,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     #CONN_PIN=26
     BT_PIN="0000"
     BT_NAME="AED-Simulator-1"
-    FW_VERSION="1.0.19"
+    FW_VERSION="1.0.20"
     # Bounded stdio blocking: printf from btstack/audio callbacks must
     # never stall the run loop for long when the USB host stalls drains
     PICO_STDIO_USB_STDOUT_TIMEOUT_US=50000
