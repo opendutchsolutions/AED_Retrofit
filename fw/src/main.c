@@ -131,11 +131,6 @@ static void serial_timer_cb(btstack_timer_source_t *ts) {
   }
   btstack_run_loop_set_timer(ts, 100);
   btstack_run_loop_add_timer(ts);
-  // Run-loop heartbeat every 2 s: if this stops, the loop is stuck
-  static uint32_t alive = 0;
-  if (++alive % 20 == 0) {
-    printf("alive %u\n", alive / 20);
-  }
 }
 
 static void serial_commands_init(void) {

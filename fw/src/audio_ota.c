@@ -121,15 +121,6 @@ static void ao_dispatch(const uint8_t sf[35]) {
   uint16_t wire = (uint16_t)(sf[32] | (sf[33] << 8));
   if (crc != wire) {
     _sf_bad++;
-    if (_sf_bad <= 3) {
-      printf("[aota] sf_bad type=%u seq=%u crc=%04x want=%04x\n", sf[0],
-             (unsigned)(sf[2] | (sf[3] << 8)), wire, crc);
-      printf("[aota] raw:");
-      for (int i = 0; i < 35; i++) {
-        printf(" %02x", sf[i]);
-      }
-      printf("\n");
-    }
     return;
   }
   uint8_t type = sf[0];

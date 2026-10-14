@@ -208,13 +208,11 @@ static void ota_program_page(void *param) {
 // flash_safe_execute (interrupt-safe, works during BLE).
 static bool flush_sector(void) {
   _flush_param.offset = OTA_STAGING_BASE - XIP_BASE + _received;
-  uint32_t t0 = time_us_32();
   int rc = flash_safe_execute(ota_erase_sector, &_flush_param, 100);
   if (rc != PICO_OK) {
     printf("[ota] erase failed: %d\n", rc);
     return false;
   }
-  uint32_t t_erase = time_us_32() - t0;
   _flush_param.buf_off = 0;
   for (uint32_t off = 0; off < FLASH_SECTOR_SIZE_4K; off += FLASH_PAGE_SIZE_256) {
     _flush_param.offset = OTA_STAGING_BASE - XIP_BASE + _received + off;
@@ -228,8 +226,9 @@ static bool flush_sector(void) {
   _received += _buf_fill;
   _buf_fill = 0;
   _sector_count++;
-  printf("[ota] sector %u flushed (erase %lu us, total %lu us, %u bytes in)\n",
-         _sector_count, t_erase, time_us_32() - t0, _received);
+  if (_sector_count % 32 == 0) {
+    printf("[ota] %u kB staged\n", _received / 1024);
+  }
   return true;
 }
 
@@ -299,18 +298,13 @@ static void handle_data(const uint8_t *buffer, uint16_t size) {
   static uint32_t _write_count = 0;
   _write_count++;
   if (_state != OTA_RECEIVING) {
-    printf("[ota] data outside transfer ignored (write #%u, %u bytes)\n",
-           _write_count, size);
     return; // ignore data outside a transfer
   }
   if (_dry_run) {
     _received += size; // diagnostic mode: count only, no flash
     return;
   }
-  if (_write_count % 128 == 0) {
-    printf("[ota] write #%u (%u bytes, %u in)\n", _write_count, size,
-           _received + _buf_fill);
-  }
+  (void)_write_count;
   while (size > 0) {
     // Route bytes past the image into the signature buffer
     if (_received + _buf_fill >= _image_size) {
