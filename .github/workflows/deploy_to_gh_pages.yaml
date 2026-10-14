@@ -41,8 +41,9 @@ jobs:
             -DPICO_BOARD=pico2_w \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build fw/build
+          python3 fw/uf2_to_image.py fw/build/picow-a2dp.uf2 fw/build/picow-a2dp.image.bin
           openssl dgst -sha256 -sign fw/ota_signing_key.pem \
-            -out fw/build/picow-a2dp.sig.der fw/build/picow-a2dp.bin
+            -out fw/build/picow-a2dp.sig.der fw/build/picow-a2dp.image.bin
           python3 fw/sig-der-to-raw.py fw/build/picow-a2dp.sig.der fw/build/picow-a2dp.sig
           mkdir -p web_app/public/firmware
           cp fw/build/picow-a2dp.uf2 web_app/public/firmware/picow-a2dp.uf2
