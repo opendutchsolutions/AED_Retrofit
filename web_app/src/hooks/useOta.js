@@ -162,6 +162,23 @@ export function useOta({ getDevice, setOtaActive }) {
       const FLASH_BLOCK = Number(q.get('otaBlock')) > 0 ? Number(q.get('otaBlock')) : 4096;
       const ACK_TIMEOUT_MS = 2000;
       const FLUSH_PAUSE_MS = Number(q.get('otaPause')) >= 0 ? Number(q.get('otaPause')) : 250;
+      // A hung write (some iOS shims never resolve writeValue on
+      // oversized or wedged packets) must surface as an error instead
+      // of silently stalling the transfer.
+      const WRITE_TIMEOUT_MS = 8000;
+      const writeWithTimeout = async (part) => {
+        let timer = null;
+        try {
+          return await Promise.race([
+            data.writeValue(part),
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error('schrijfactie reageert niet (8s)')), WRITE_TIMEOUT_MS);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      };
       const waitForAck = async (expected) => {
         const deadline = Date.now() + ACK_TIMEOUT_MS;
         while (ackCount < expected && Date.now() < deadline) {
@@ -170,10 +187,11 @@ export function useOta({ getDevice, setOtaActive }) {
         return ackCount >= expected;
       };
       let nextBoundary = FLASH_BLOCK;
+      addLog(`Schrijfrichting: write-with-response, chunks ${chunk} B, blok ${FLASH_BLOCK / 1024} kB, pauze ${FLUSH_PAUSE_MS} ms`);
       for (let off = 0, n = 0; off < blob.length; n++) {
         const part = blob.subarray(off, Math.min(off + chunk, blob.length));
         try {
-          await data.writeValue(part); // with response: radio-paced
+          await writeWithTimeout(part); // with response: radio-paced
         } catch (err) {
           const msg = String(err?.message ?? err);
           // The negotiated ATT MTU varies per platform (iOS ~185, no API
