@@ -86,6 +86,7 @@ static uint32_t _image_crc = 0;
 static uint32_t _received = 0;
 static uint32_t _buf_fill = 0;
 static uint32_t _sector_count = 0;
+static uint32_t _sig_count = 0;
 static bool _dry_run = false; // START flag bit0: count only, no flash
 static uint32_t _staged_crc = 0; // image crc of the current/last transfer
 static uint32_t _stage_check_crc = 0; // on-demand staging checksum (cmd 0x05)
@@ -259,7 +260,7 @@ static void finish_transfer(void) {
       return;
     }
   }
-  if (_received < _image_size + 64) {
+  if (_received < _image_size) {
     set_error(OTA_ERR_INCOMPLETE);
     return;
   }
@@ -329,9 +330,12 @@ static void handle_data(const uint8_t *buffer, uint16_t size) {
       }
       buffer += sig_take;
       size -= sig_take;
-      // Account for the signature bytes in _received via _buf_fill
-      // (they don't go to flash, but count toward the total)
-      _received += sig_take;
+      // Signature bytes count separately: _received must stay
+      // image-only, because flush_sector writes the final partial
+      // sector at staging offset _received — counting the 64 signature
+      // bytes here shifted the final sector 64 bytes too far (corrupting
+      // the tail of every image not aligned to 4 kB).
+      _sig_count += sig_take;
       if (size == 0) break;
     }
 
@@ -389,6 +393,7 @@ static void handle_control(const uint8_t *buffer, uint16_t size) {
     _stage_check_crc = 0;
     _received = resume_off;
     _buf_fill = 0;
+    _sig_count = 0;
     _sector_count = resume_off / FLASH_SECTOR_SIZE_4K;
     _dry_run = (flags & 1u) != 0;
     _have_signature = false;
