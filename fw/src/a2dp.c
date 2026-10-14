@@ -44,6 +44,7 @@
 #include <pico/cyw43_arch.h>
 
 #include "avrcp.h"
+#include <math.h>
 #include "board_config.h"
 
 const btstack_audio_sink_t *btstack_audio_pico_sink_get_instance(void);
@@ -108,11 +109,96 @@ static uint8_t sbc_configuration[4];
 /**
  * Process volume on decoded frames and send to I2S buffer or ring buffer.
  */
+
+// --- PCM channel analyzer (serial: "pcmtest <blocks>" / "pcmreport") ---
+// Measures per-slot tone energy (Goertzel, 128-sample blocks at the
+// configured sample rate) to characterize what the SBC/A2DP channel
+// does to candidate modem frequencies.
+#define PCM_BLOCK 128u
+#define PCM_SLOTS 40u
+
+static volatile uint32_t _pcm_blocks_left = 0;
+static uint32_t _pcm_blocks_done = 0;
+static float _pcm_coeff[PCM_SLOTS];
+static float _pcm_min[PCM_SLOTS];
+static float _pcm_max[PCM_SLOTS];
+static double _pcm_sum[PCM_SLOTS];
+static int16_t _pcm_rem[PCM_BLOCK];
+static uint32_t _pcm_rem_len = 0;
+static uint32_t _pcm_fs = 48000;
+
+void a2dp_pcm_analyze_start(uint32_t blocks) {
+  _pcm_fs = _sbc_configuration.sampling_frequency
+                ? _sbc_configuration.sampling_frequency
+                : 48000;
+  for (uint32_t k = 0; k < PCM_SLOTS; k++) {
+    float freq = (float)(k + 1) * ((float)_pcm_fs / (float)PCM_BLOCK);
+    float w = 2.0f * 3.14159265f * freq / (float)_pcm_fs;
+    _pcm_coeff[k] = 2.0f * cosf(w);
+    _pcm_min[k] = 1e30f;
+    _pcm_max[k] = 0.0f;
+    _pcm_sum[k] = 0.0;
+  }
+  _pcm_blocks_done = 0;
+  _pcm_rem_len = 0;
+  _pcm_blocks_left = blocks; // volatile store last
+  printf("[pcm] analyzing %u blocks at %u Hz\n", blocks, (unsigned)_pcm_fs);
+}
+
+static void pcm_analyze_block(const int16_t *x) {
+  for (uint32_t k = 0; k < PCM_SLOTS; k++) {
+    float coeff = _pcm_coeff[k];
+    float s1 = 0.0f, s2 = 0.0f;
+    for (uint32_t i = 0; i < PCM_BLOCK; i++) {
+      float s0 = x[i] + coeff * s1 - s2;
+      s2 = s1;
+      s1 = s0;
+    }
+    float power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+    if (power < _pcm_min[k]) _pcm_min[k] = power;
+    if (power > _pcm_max[k]) _pcm_max[k] = power;
+    _pcm_sum[k] += power;
+  }
+  _pcm_blocks_done++;
+}
+
+void a2dp_pcm_analyze_report(void) {
+  if (_pcm_blocks_done == 0) {
+    printf("[pcm] no data (was a stream playing?)\n");
+    return;
+  }
+  printf("[pcm] %u blocks analyzed at %u Hz\n", _pcm_blocks_done,
+         (unsigned)_pcm_fs);
+  for (uint32_t k = 0; k < PCM_SLOTS; k++) {
+    float freq = (float)(k + 1) * ((float)_pcm_fs / (float)PCM_BLOCK);
+    printf("[pcm] slot %2u (%6.0f Hz): min %8ld max %8ld mean %8ld (u6)\n",
+           k + 1, (double)freq, (long)(_pcm_min[k] / 1e6),
+           (long)(_pcm_max[k] / 1e6),
+           (long)((_pcm_sum[k] / _pcm_blocks_done) / 1e6));
+  }
+}
+
 static void handle_pcm_data(int16_t *data, int num_audio_frames,
                             int num_channels, int sample_rate, void *context) {
   UNUSED(sample_rate);
   UNUSED(context);
   UNUSED(num_channels); // Must be stereo == 2
+
+  // Channel analyzer tap: buffer the left channel into 128-sample
+  // blocks and run the per-slot Goertzel while a test stream plays.
+  if (_pcm_blocks_left > 0) {
+    for (int i = 0; i < num_audio_frames && _pcm_blocks_left > 0; i++) {
+      _pcm_rem[_pcm_rem_len++] = data[2 * i];
+      if (_pcm_rem_len == PCM_BLOCK) {
+        _pcm_rem_len = 0;
+        _pcm_blocks_left--; // volatile
+        pcm_analyze_block(_pcm_rem);
+      }
+    }
+    if (_pcm_blocks_left == 0) {
+      printf("[pcm] analysis complete\n");
+    }
+  }
 
   const btstack_audio_sink_t *audio_sink = btstack_audio_sink_get_instance();
   if (!audio_sink) {

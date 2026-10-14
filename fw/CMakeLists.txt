@@ -63,6 +63,10 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     BT_PIN="0000"
     BT_NAME="AED-Simulator-1"
     FW_VERSION="1.0.17"
+    # Bounded stdio blocking: printf from btstack/audio callbacks must
+    # never stall the run loop for long when the USB host stalls drains
+    PICO_STDIO_USB_STDOUT_TIMEOUT_US=50000
+    PICO_STDIO_DEADLOCK_TIMEOUT_MS=50
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -161,4 +165,6 @@ target_link_libraries(${PROJECT_NAME} kvstore_default)
 
 pico_add_extra_outputs(${PROJECT_NAME})
 pico_enable_stdio_usb(${PROJECT_NAME} 1)
-# pico_enable_stdio_uart(${PROJECT_NAME} 0)
+# UART stdio off: the trainer's carrier board loops UART TX back into RX,
+# so every log line echoed into the serial command parser as garbage
+pico_enable_stdio_uart(${PROJECT_NAME} 0)

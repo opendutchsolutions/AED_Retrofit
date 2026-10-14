@@ -42,3 +42,8 @@ void a2dp_sink_begin();
 uint8_t a2dp_sink_connect_peer(bd_addr_t remote);
 
 #endif
+
+/** Serial diagnostic: measure per-slot tone energy of the A2DP PCM
+ * stream (Goertzel, 128-sample blocks) to characterize the SBC channel. */
+void a2dp_pcm_analyze_start(uint32_t blocks);
+void a2dp_pcm_analyze_report(void);

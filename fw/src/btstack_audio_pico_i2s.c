@@ -96,6 +96,10 @@ static audio_buffer_pool_t *init_audio(uint32_t sample_frequency,
     return NULL;
   }
   printf("[i2s] claimed pio0 sm %d\n", sm);
+  // audio_i2s_setup calls pio_sm_claim itself; a double claim panics
+  // (hard freeze). Release our probe claim — audio re-claims immediately,
+  // nothing else can grab it in between (single-threaded init).
+  pio_sm_unclaim(pio0, sm);
 
   audio_i2s_config_t config;
   config.data_pin = PICO_AUDIO_I2S_DATA_PIN;

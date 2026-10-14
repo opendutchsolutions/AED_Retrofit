@@ -23,6 +23,7 @@
  * Author:          Hoog-V
  */
 
+#include "a2dp.h"
 #include "board_config.h"
 #include "bt.h"
 #include "gatt_service.h"
@@ -33,6 +34,7 @@
 #include "pico/stdlib.h"
 #include <btstack_run_loop.h>
 #include <stdio.h>
+#include <string.h>
 #ifdef LIB_PICO_STDIO_USB
 #include "pico/stdio_usb.h"
 #endif
@@ -73,19 +75,44 @@ static char _cmd_buf[64];
 static uint8_t _cmd_len = 0;
 static btstack_timer_source_t _serial_timer;
 
+static uint32_t parse_num(const char *s) {
+  uint32_t v = 0;
+  while (*s >= '0' && *s <= '9') {
+    v = v * 10u + (uint32_t)(*s - '0');
+    s++;
+  }
+  return v;
+}
+
 static void serial_timer_cb(btstack_timer_source_t *ts) {
   int c;
   while ((c = getchar_timeout_us(0)) >= 0) {
     if (c == '\n' || c == '\r') {
       if (_cmd_len > 0) {
         _cmd_buf[_cmd_len] = '\0';
-        unsigned long n = 0;
-        if (sscanf(_cmd_buf, "otatest %lu", &n) == 1 && n > 0) {
-          ota_selftest((uint32_t)n);
-        } else if (sscanf(_cmd_buf, "otaapply %lu", &n) == 1 && n > 0) {
-          ota_apply_selftest((uint32_t)n);
+        // Hosts with tty echo enabled feed our own output back into RX;
+        // ignore lines that are clearly our own log output.
+        if (_cmd_buf[0] == '[' ||
+            strncmp(_cmd_buf, "commands:", 9) == 0 ||
+            strncmp(_cmd_buf, "alive ", 6) == 0) {
+          _cmd_len = 0;
+          continue;
+        }
+        uint32_t n = 0;
+        if (strncmp(_cmd_buf, "otatest ", 8) == 0 &&
+            (n = parse_num(_cmd_buf + 8)) > 0) {
+          ota_selftest(n);
+        } else if (strncmp(_cmd_buf, "otaapply ", 9) == 0 &&
+                   (n = parse_num(_cmd_buf + 9)) > 0) {
+          ota_apply_selftest(n);
+        } else if (strncmp(_cmd_buf, "pcmtest ", 8) == 0 &&
+                   (n = parse_num(_cmd_buf + 8)) > 0) {
+          a2dp_pcm_analyze_start(n);
+        } else if (strcmp(_cmd_buf, "pcmreport") == 0) {
+          a2dp_pcm_analyze_report();
         } else {
-          printf("commands: otatest <bytes>, otaapply <bytes>\n");
+          printf("commands: got \"%s\" — otatest <b>, otaapply <b>, "
+                 "pcmtest <b>, pcmreport\n", _cmd_buf);
         }
         _cmd_len = 0;
       }
@@ -97,6 +124,11 @@ static void serial_timer_cb(btstack_timer_source_t *ts) {
   }
   btstack_run_loop_set_timer(ts, 100);
   btstack_run_loop_add_timer(ts);
+  // Run-loop heartbeat every 2 s: if this stops, the loop is stuck
+  static uint32_t alive = 0;
+  if (++alive % 20 == 0) {
+    printf("alive %u\n", alive / 20);
+  }
 }
 
 static void serial_commands_init(void) {
