@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useBLE } from './hooks/useBLE';
 import { useAudio } from './hooks/useAudio';
+import { useMetronome } from './hooks/useMetronome';
 import { AUDIO_FILES } from './scenario/default';
 import { useSimulation } from './hooks/useSimulation';
 import { StatusChip, ConnectCard } from './components/StatusBar';
@@ -84,6 +85,14 @@ function DeviceStatusCard({ status, deviceName, running, ledMask }) {
 export default function App() {
   const [screen, setScreen] = useState('verbinden');
   const { play: playAudio, stop: stopAudio, pauseMain, resumeMain, playOverlay } = useAudio();
+  const metronome = useMetronome();
+  const [metronomeRatio, setMetronomeRatio] = useState(
+    () => localStorage.getItem('metronome-ratio') || 'Uit'
+  );
+  useEffect(() => {
+    localStorage.setItem('metronome-ratio', metronomeRatio);
+  }, [metronomeRatio]);
+
 
   // Forward ref so BLE hook can call into sim without circular dependency
   const simRef = useRef(null);
@@ -127,6 +136,16 @@ export default function App() {
     playAudio,
     stopAudio,
   });
+
+  // Guide the compression/ventilation rhythm during the scenario's CPR
+  // phase when a metronome ratio is selected
+  useEffect(() => {
+    if (sim.running && sim.currentStep?.metronome && metronomeRatio !== 'Uit') {
+      metronome.start(metronomeRatio);
+    } else {
+      metronome.stop();
+    }
+  }, [sim.running, sim.currentStep, metronomeRatio, metronome]);
   simRef.current = sim;
 
   function onToggleLed(bit) {
@@ -256,6 +275,8 @@ export default function App() {
                   onSkipPhase={sim.skipPhase}
                   language={sim.language}
                   onLanguageChange={sim.setLanguage}
+                  metronome={metronomeRatio}
+                  onMetronomeChange={setMetronomeRatio}
                   connected={connected}
                 />
               </div>

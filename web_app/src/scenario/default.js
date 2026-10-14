@@ -166,6 +166,7 @@ export const DEFAULT_STEPS = [
     type: 'timed',
     leds: { on_off: true },
     audioKey: 'cpr',
+    metronome: true,
     duration_seconds: 120,
     on_complete: 'analyse-2',
     choices: [

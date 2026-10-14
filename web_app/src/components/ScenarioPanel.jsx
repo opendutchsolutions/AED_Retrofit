@@ -19,6 +19,7 @@ export function ScenarioPanel({
   running, currentStep, waitingBranch, timeLeft,
   onStart, onStop, onChooseBranch, onSkipPhase,
   language, onLanguageChange,
+  metronome, onMetronomeChange,
   connected,
 }) {
   const badge = currentStep ? TYPE_BADGE[currentStep.type] : null;
@@ -46,6 +47,27 @@ export function ScenarioPanel({
             <option>Nederlands</option>
             <option>Duits</option>
           </select>
+        </div>
+      )}
+
+      {!running && (
+        <div className="field" style={{ marginTop: '.8rem' }}>
+          <label htmlFor="metronome-select">Metronoom (compressies : ventilaties)</label>
+          <select
+            id="metronome-select"
+            value={metronome}
+            onChange={e => onMetronomeChange(e.target.value)}
+            style={{ maxWidth: '20rem' }}
+          >
+            <option value="Uit">Uit</option>
+            <option value="30:2">30:2 — volwassenen</option>
+            <option value="15:1">15:1</option>
+            <option value="10:1">10:1</option>
+          </select>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            Tijdens de reanimatiefase tikt de metronoom de compressies (110/min)
+            en begeleidt de ventilaties.
+          </p>
         </div>
       )}
 
