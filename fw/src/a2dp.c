@@ -44,6 +44,7 @@
 #include <pico/cyw43_arch.h>
 
 #include "avrcp.h"
+#include "audio_ota.h"
 #include <math.h>
 #include "board_config.h"
 
@@ -183,6 +184,9 @@ static void handle_pcm_data(int16_t *data, int num_audio_frames,
   UNUSED(sample_rate);
   UNUSED(context);
   UNUSED(num_channels); // Must be stereo == 2
+
+  // Audio-path OTA demodulator (armed only during an audio update)
+  audio_ota_pcm(data, (uint32_t)num_audio_frames);
 
   // Channel analyzer tap: buffer the left channel into 128-sample
   // blocks and run the per-slot Goertzel while a test stream plays.

@@ -489,6 +489,19 @@ static void ota_hci_handler(uint8_t packet_type, uint16_t channel,
   }
 }
 
+// --- Exported for the audio-path receiver (audio_ota.c) ---
+void ota_feed(const uint8_t *buffer, uint16_t size) {
+  handle_data(buffer, size);
+}
+
+void ota_control(const uint8_t *buffer, uint16_t size) {
+  handle_control(buffer, size);
+}
+
+uint32_t ota_current_offset(void) {
+  return _received + _buf_fill;
+}
+
 void ota_init(void) {
   _handle_service_start = att_db_util_add_service_uuid16(OTA_SERVICE_UUID);
 

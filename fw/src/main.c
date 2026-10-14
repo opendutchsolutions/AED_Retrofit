@@ -24,6 +24,7 @@
  */
 
 #include "a2dp.h"
+#include "audio_ota.h"
 #include "board_config.h"
 #include "bt.h"
 #include "gatt_service.h"
@@ -110,6 +111,12 @@ static void serial_timer_cb(btstack_timer_source_t *ts) {
           a2dp_pcm_analyze_start(n);
         } else if (strcmp(_cmd_buf, "pcmreport") == 0) {
           a2dp_pcm_analyze_report();
+        } else if (strcmp(_cmd_buf, "audioarm") == 0) {
+          audio_ota_arm(true);
+        } else if (strcmp(_cmd_buf, "audiooff") == 0) {
+          audio_ota_arm(false);
+        } else if (strcmp(_cmd_buf, "audiostats") == 0) {
+          audio_ota_stats();
         } else {
           printf("commands: got \"%s\" — otatest <b>, otaapply <b>, "
                  "pcmtest <b>, pcmreport\n", _cmd_buf);

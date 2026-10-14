@@ -22,6 +22,11 @@
 
 void ota_init(void);
 
+/** Audio-path receiver hooks (see audio_ota.c). */
+void ota_feed(const uint8_t *buffer, uint16_t size);
+void ota_control(const uint8_t *buffer, uint16_t size);
+uint32_t ota_current_offset(void);
+
 /**
  * @brief At boot: apply a downloaded OTA image (if any) by flashing it
  *        over the main firmware. Requires kvs_init() to have been called.

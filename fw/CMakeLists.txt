@@ -52,6 +52,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/gatt_service.c
     src/ota.c
     src/ota_apply.c
+    src/audio_ota.c
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
