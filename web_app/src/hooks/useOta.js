@@ -150,15 +150,6 @@ export function useOta({ getDevice, setOtaActive }) {
       while (confirmed < blob.length && round < MAX_ROUNDS) {
         round++;
         try {
-          if (round > 1) {
-            // Between rounds (i.e. after a failure) the shim may still
-            // report a dead link as connected — reset it. Round 1 uses
-            // the fresh connection untouched: a forced disconnect of a
-            // healthy link makes some iOS shims reload the page, which
-            // kills the transfer.
-            try { dev.gatt.disconnect(); } catch (_) { /* best effort */ }
-            await sleep(400);
-          }
           if (!dev.gatt.connected) {
             addLog(`Verbinden (ronde ${round})…`);
             await withTimeout(dev.gatt.connect(), 'herverbinding');
