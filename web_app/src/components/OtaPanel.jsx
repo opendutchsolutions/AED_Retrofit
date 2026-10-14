@@ -8,6 +8,7 @@ export function OtaPanel({ connected, fwVersion, getDevice, setOtaActive }) {
   const { busy, status, progress, run, setStatus, log, addLog } = useOta({ getDevice, setOtaActive });
   const [fetching, setFetching] = useState(false);
   const [serverVersion, setServerVersion] = useState(null);
+  const [logOpen, setLogOpen] = useState(false);
 
   React.useEffect(() => {
     fetchServerVersion().then(v => {
@@ -44,6 +45,11 @@ export function OtaPanel({ connected, fwVersion, getDevice, setOtaActive }) {
   }
 
   const inProgress = busy || fetching;
+
+  // During an update the log is the live progress view — always open it.
+  React.useEffect(() => {
+    if (inProgress) setLogOpen(true);
+  }, [inProgress]);
 
   return (
     <Card className="log-card">
@@ -91,7 +97,32 @@ export function OtaPanel({ connected, fwVersion, getDevice, setOtaActive }) {
       {status && (
         <p className="message" role="status" style={{ marginBottom: 0 }}>{status}</p>
       )}
-      <LogField entries={log} label="Update-logboek" />
+      {(updateAvailable || !versionKnown) && (
+        <div style={{ marginTop: '.8rem' }}>
+          <button
+            type="button"
+            aria-expanded={logOpen}
+            onClick={() => setLogOpen(v => !v)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '.4rem',
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              font: 'inherit', color: 'inherit',
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                display: 'inline-block', transition: 'transform .15s',
+                transform: logOpen ? 'rotate(90deg)' : 'none',
+              }}
+            >
+              ▸
+            </span>
+            <span className="eyebrow">Update-logboek</span>
+          </button>
+          {logOpen && <LogField entries={log} label={null} />}
+        </div>
+      )}
     </Card>
   );
 }
