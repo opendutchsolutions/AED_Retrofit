@@ -17,7 +17,7 @@ const TYPE_BADGE = {
 
 export function ScenarioPanel({
   running, currentStep, waitingBranch, timeLeft,
-  onStart, onStop, onChooseBranch, onSkipPhase,
+  onStart, onStop, onChooseBranch, onSkipPhase, onFeedback, feedbackCount = 0,
   language, onLanguageChange,
   metronome, onMetronomeChange,
   connected,
@@ -130,6 +130,8 @@ export function ScenarioPanel({
                     Fase inkorten
                   </Btn>
                 )}
+                <Btn variant="primary" onClick={onFeedback}>Feedback vastleggen</Btn>
+                <span className="feedback-count">{feedbackCount} beoordeeld</span>
                 <Btn variant="danger" onClick={onStop}>Oefening beëindigen</Btn>
               </div>
               <p className="hint">
