@@ -3,10 +3,10 @@ import React, { useRef, useState } from 'react';
 const ITEMS = [
   { key: 'verbinden', label: 'Verbinden' },
   { key: 'oefenen', label: 'Training' },
-  { key: 'feedback', label: 'Feedback', unavailable: true },
+  { key: 'feedback', label: 'Feedback' },
   { key: 'afronden', label: 'Afronden' },
   { key: 'instructeur', label: 'Instructeurinstellingen' },
-  { key: 'systeemcontrole', label: 'Systeemcontrole', unavailable: true },
+  { key: 'systeemcontrole', label: 'Systeemcontrole' },
 ];
 
 export function NavigationMenu({ screen, onNavigate }) {
@@ -68,7 +68,7 @@ export function NavigationMenu({ screen, onNavigate }) {
               </button>
             ))}
           </nav>
-          <p className="menu-note">Feedback en Systeemcontrole volgen in een volgende stap.</p>
+
           <button type="button" className="menu-close" onClick={() => closeMenu()}>Menu sluiten</button>
         </div>
       </dialog>
