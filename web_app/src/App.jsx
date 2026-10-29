@@ -14,6 +14,7 @@ import { SessionLog } from './components/SessionLog';
 import { OtaPanel } from './components/OtaPanel';
 import { ScenarioEditor } from './components/ScenarioEditor';
 import { Card, Btn } from './components/UI';
+import { NavigationMenu } from './components/NavigationMenu';
 
 const SCREENS = [
   { key: 'verbinden',  label: 'Verbind met een apparaat',  eyebrow: 'Stap 1' },
@@ -50,7 +51,7 @@ function Hero({ screen }) {
   return (
     <div className="hero">
       <p className="eyebrow">{current ? current.eyebrow : 'Overig'}</p>
-      <h1>{title}</h1>
+      <h1 tabIndex={-1}>{title}</h1>
       <p>{text}</p>
     </div>
   );
@@ -214,6 +215,7 @@ export default function App() {
 
   return (
     <>
+      <a className="skip-link" href="#main">Ga naar de hoofdinhoud</a>
       <header className="site-header">
         <div className="brand" aria-label="AED Oefensysteem">
           <img className="brand-mark" src="ods-logo.svg" alt="" aria-hidden="true" />
@@ -223,23 +225,16 @@ export default function App() {
           </div>
         </div>
         <StatusChip status={ble.status} deviceName={ble.deviceName} />
+        <NavigationMenu
+          screen={screen}
+          onNavigate={key => {
+            setScreen(key);
+            requestAnimationFrame(() => document.querySelector('#main h1')?.focus());
+          }}
+        />
       </header>
 
       <div className="app-shell">
-        <nav className="main-nav" aria-label="Hoofdnavigatie">
-          {SCREENS.map(({ key, label }) => (
-            <button
-              key={key}
-              className={`nav-button${screen === key ? ' is-active' : ''}`}
-              onClick={() => setScreen(key)}
-              aria-current={screen === key ? 'page' : undefined}
-            >
-              <span aria-hidden="true">{SCREENS.findIndex(s => s.key === key) + 1}</span>
-              {label}
-            </button>
-          ))}
-        </nav>
-
         <main id="main" tabIndex={-1}>
           {screen === 'verbinden' && (
             <section className="screen" aria-labelledby="h-verbinden">
