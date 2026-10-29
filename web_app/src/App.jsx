@@ -14,6 +14,11 @@ import { SessionLog } from './components/SessionLog';
 import { OtaPanel } from './components/OtaPanel';
 import { ScenarioEditor } from './components/ScenarioEditor';
 import { Card, Btn } from './components/UI';
+import { NavigationMenu } from './components/NavigationMenu';
+import { FeedbackPanel, FeedbackSummary } from './components/FeedbackPanel';
+import { FEEDBACK_STORAGE_KEY, readSavedFeedback, summarizeFeedback } from './feedback/model';
+import { SystemPanel } from './components/SystemPanel';
+import { parseFeedbackBackup } from './system/capabilities';
 
 const SCREENS = [
   { key: 'verbinden',  label: 'Verbind met een apparaat',  eyebrow: 'Stap 1' },
@@ -50,7 +55,7 @@ function Hero({ screen }) {
   return (
     <div className="hero">
       <p className="eyebrow">{current ? current.eyebrow : 'Overig'}</p>
-      <h1>{title}</h1>
+      <h1 tabIndex={-1}>{title}</h1>
       <p>{text}</p>
     </div>
   );
@@ -84,6 +89,86 @@ function DeviceStatusCard({ status, deviceName, running, ledMask }) {
 
 export default function App() {
   const [screen, setScreen] = useState('verbinden');
+  const [feedbackReturnScreen, setFeedbackReturnScreen] = useState('oefenen');
+  const [feedback, setFeedback] = useState(readSavedFeedback);
+  const [feedbackSaveStatus, setFeedbackSaveStatus] = useState('Alleen in deze browser opgeslagen');
+  useEffect(() => {
+    try {
+      localStorage.setItem(FEEDBACK_STORAGE_KEY, JSON.stringify(feedback));
+      setFeedbackSaveStatus('Alleen in deze browser opgeslagen');
+    } catch {
+      setFeedbackSaveStatus('Tijdelijk bewaard zolang deze pagina openstaat');
+    }
+  }, [feedback]);
+
+  function openFeedback(origin = screen) {
+    setFeedbackReturnScreen(origin === 'afronden' ? 'afronden' : 'oefenen');
+    setScreen('feedback');
+    requestAnimationFrame(() => document.querySelector('#main h1')?.focus());
+  }
+
+  function returnFromFeedback() {
+    setScreen(feedbackReturnScreen);
+    requestAnimationFrame(() => {
+      const target = feedbackReturnScreen === 'afronden'
+        ? document.querySelector('.feedback-result button')
+        : document.querySelector('.feedback-count')?.previousElementSibling;
+      (target || document.querySelector('#main h1'))?.focus();
+    });
+  }
+
+  function downloadJson(filename, data) {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportFeedback() {
+    downloadJson('aed-training-feedback.json', {
+      saved: new Date().toISOString(),
+      feedback,
+      steps: sim.steps.map(({ id, label }) => ({ id, label })),
+      log: sim.sessionLog,
+    });
+  }
+
+  async function importFeedbackBackup(file) {
+    const text = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Bestand kon niet worden gelezen.'));
+      reader.readAsText(file);
+    });
+    const imported = parseFeedbackBackup(text);
+    if ((Object.keys(feedback.answers).length || feedback.note) &&
+      !window.confirm('Bestaande feedback vervangen door deze reservekopie?')) return false;
+    setFeedback(imported);
+    return true;
+  }
+
+  async function testAudioOutput() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) throw new Error('Web Audio niet beschikbaar');
+    const context = new AudioContextClass();
+    try {
+      await context.resume();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.frequency.value = 660;
+      gain.gain.value = 0.08;
+      oscillator.connect(gain).connect(context.destination);
+      const finished = new Promise(resolve => { oscillator.onended = resolve; });
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.6);
+      await finished;
+      return 'Testtoon aangeboden aan de standaard audio-uitgang; hoorbaarheid is niet bevestigd.';
+    } finally {
+      await context.close();
+    }
+  }
   const { play: playAudio, stop: stopAudio, pauseMain, resumeMain, playOverlay } = useAudio();
   const { start: startMetronome, stop: stopMetronome } = useMetronome();
   const [metronomeRatio, setMetronomeRatio] = useState(
@@ -214,6 +299,7 @@ export default function App() {
 
   return (
     <>
+      <a className="skip-link" href="#main">Ga naar de hoofdinhoud</a>
       <header className="site-header">
         <div className="brand" aria-label="AED Oefensysteem">
           <img className="brand-mark" src="ods-logo.svg" alt="" aria-hidden="true" />
@@ -223,23 +309,20 @@ export default function App() {
           </div>
         </div>
         <StatusChip status={ble.status} deviceName={ble.deviceName} />
+        <NavigationMenu
+          screen={screen}
+          onNavigate={key => {
+            if (key === 'feedback') {
+              openFeedback();
+              return;
+            }
+            setScreen(key);
+            requestAnimationFrame(() => document.querySelector('#main h1')?.focus());
+          }}
+        />
       </header>
 
       <div className="app-shell">
-        <nav className="main-nav" aria-label="Hoofdnavigatie">
-          {SCREENS.map(({ key, label }) => (
-            <button
-              key={key}
-              className={`nav-button${screen === key ? ' is-active' : ''}`}
-              onClick={() => setScreen(key)}
-              aria-current={screen === key ? 'page' : undefined}
-            >
-              <span aria-hidden="true">{SCREENS.findIndex(s => s.key === key) + 1}</span>
-              {label}
-            </button>
-          ))}
-        </nav>
-
         <main id="main" tabIndex={-1}>
           {screen === 'verbinden' && (
             <section className="screen" aria-labelledby="h-verbinden">
@@ -298,10 +381,15 @@ export default function App() {
                   currentStep={sim.currentStep}
                   waitingBranch={sim.waitingBranch}
                   timeLeft={sim.timeLeft}
-                  onStart={sim.start}
+                  onStart={() => {
+                    setFeedback({ answers: {}, note: '' });
+                    sim.start();
+                  }}
                   onStop={sim.stop}
                   onChooseBranch={sim.chooseBranch}
                   onSkipPhase={sim.skipPhase}
+                  onFeedback={() => openFeedback('oefenen')}
+                  feedbackCount={summarizeFeedback(feedback.answers).answered}
                   language={sim.language}
                   onLanguageChange={sim.setLanguage}
                   metronome={metronomeRatio}
@@ -309,6 +397,20 @@ export default function App() {
                   connected={connected}
                 />
               </div>
+            </section>
+          )}
+
+          {screen === 'feedback' && (
+            <section className="screen" aria-label="Feedback">
+              <FeedbackPanel
+                step={sim.currentStep}
+                answers={feedback.answers}
+                note={feedback.note}
+                onChange={(answers, note) => setFeedback({ answers, note })}
+                onBack={returnFromFeedback}
+                backLabel={feedbackReturnScreen === 'afronden' ? 'Opslaan en terug naar afronden' : 'Opslaan en terug naar training'}
+                saveStatus={feedbackSaveStatus}
+              />
             </section>
           )}
 
@@ -349,6 +451,13 @@ export default function App() {
                   running={sim.running}
                   ledMask={ble.ledMask}
                 />
+                <FeedbackSummary
+                  answers={feedback.answers}
+                  note={feedback.note}
+                  onEdit={() => openFeedback('afronden')}
+                  onExport={exportFeedback}
+                  onPrint={() => window.print()}
+                />
                 <SessionLog entries={sim.sessionLog} onClear={sim.clearSessionLog} />
                 <OtaPanel connected={connected} fwVersion={ble.fwVersion} getDevice={ble.getDevice} setOtaActive={ble.setOtaActive} />
               </div>
@@ -379,6 +488,17 @@ export default function App() {
                 />
               </div>
             </section>
+          )}
+
+          {screen === 'systeemcontrole' && (
+            <SystemPanel
+              storageAvailable={feedbackSaveStatus === 'Alleen in deze browser opgeslagen'}
+              onTestAudio={testAudioOutput}
+              onExport={() => downloadJson('aed-feedback-reservekopie.json', {
+                version: 1, saved: new Date().toISOString(), feedback,
+              })}
+              onImport={importFeedbackBackup}
+            />
           )}
         </main>
       </div>
