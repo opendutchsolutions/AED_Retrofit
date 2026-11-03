@@ -164,7 +164,7 @@ export default function App() {
       oscillator.start();
       oscillator.stop(context.currentTime + 0.6);
       await finished;
-      return 'Testtoon aangeboden aan de standaard audio-uitgang; hoorbaarheid is niet bevestigd.';
+      return 'Testtoon gestart.';
     } finally {
       await context.close();
     }
