@@ -539,6 +539,13 @@ footer {
   outline: 0;
   box-shadow: 0 0 0 3px #fff, 0 0 0 7px var(--focus);
 }
+/* Keep focus distinct from the LED glow and expected-button pulse. */
+.hotspot:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 7px var(--focus);
+  z-index: 2;
+}
 .hotspot.expected:focus-visible { animation: none; }
 
 /* ---------- Desktop zoom ---------- */

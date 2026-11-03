@@ -77,7 +77,7 @@ export const DEFAULT_STEPS = [
     choices: [
       { label: 'Schok geadviseerd', next: 'shock-advised' },
       { label: 'Geen schok geadviseerd', next: 'no-shock' },
-      { label: 'Geen puls — stop sessie', next: 'no-pulse' },
+      { label: 'Geen schokbaar ritme — stop sessie', next: 'no-pulse' },
     ],
   },
   {
@@ -123,7 +123,7 @@ export const DEFAULT_STEPS = [
     choices: [
       { label: 'Schok geadviseerd', next: 'shock-advised-2' },
       { label: 'Geen schok geadviseerd', next: 'rosc-or-continue' },
-      { label: 'Geen puls — stop sessie', next: 'no-pulse' },
+      { label: 'Geen schokbaar ritme — stop sessie', next: 'no-pulse' },
     ],
   },
   {
@@ -150,7 +150,7 @@ export const DEFAULT_STEPS = [
     on_complete: 'analyse-2',
     choices: [
       { label: 'Heranalyseer hart-ritme', next: 'analyse-2' },
-      { label: 'Geen puls — stop sessie', next: 'no-pulse' },
+      { label: 'Geen schokbaar ritme — stop sessie', next: 'no-pulse' },
       { label: 'Beeindig scenario', next: 'end-scenario'},
     ],
   },
@@ -164,13 +164,13 @@ export const DEFAULT_STEPS = [
     choices: [
       { label: 'ROSC — spontane hartslag hersteld', next: 'end-scenario' },
       { label: 'Reanimatie voortzetten', next: 'cpr-2' },
-      { label: 'Geen puls — stop sessie', next: 'no-pulse' },
+      { label: 'Geen schokbaar ritme — stop sessie', next: 'no-pulse' },
     ],
   },
   {
     id: 'no-pulse',
-    label: 'Geen puls — stop sessie',
-    instruction: 'Geen puls waargenomen. Stop de reanimatie en beëindig de oefening. Bekijk het logboek onder Afronden.',
+    label: 'Geen schokbaar ritme — stop sessie',
+    instruction: 'Geen schokbaar ritme waargenomen. Stop de reanimatie en beëindig de oefening. Bekijk het logboek onder Afronden.',
     type: 'end',
     leds: {},
     audioKey: null,

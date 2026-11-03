@@ -39,6 +39,31 @@ test('training opens contextual feedback, returns without stopping and shows res
   expect(JSON.parse(localStorage.getItem(FEEDBACK_STORAGE_KEY)).answers['algemene-veiligheid']).toBe('5');
 });
 
+test('audio check reports a concise GUI status without claiming audibility', async () => {
+  vi.stubGlobal('AudioContext', class {
+    currentTime = 0;
+    destination = {};
+    async resume() {}
+    createOscillator() {
+      return {
+        frequency: { value: 0 },
+        connect() { return this; },
+        start() {},
+        stop() { queueMicrotask(() => this.onended?.()); },
+      };
+    }
+    createGain() { return { gain: { value: 0 }, connect() { return this; } }; }
+    async close() {}
+  });
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(screen.getByRole('button', { name: /menu/i }));
+  await user.click(screen.getByRole('button', { name: 'Systeemcontrole' }));
+  await user.click(screen.getByRole('button', { name: 'Audio testen' }));
+  await waitFor(() => expect(within(screen.getByRole('region', { name: 'Systeemcontrole' }))
+    .getByRole('status').textContent).toBe('Testtoon gestart.'));
+});
+
 test('system check imports feedback from a reference backup into the training flow', async () => {
   const user = userEvent.setup();
   render(<App />);
